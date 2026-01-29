@@ -174,7 +174,7 @@ export default function LoginPage() {
         </button>
       </form>
       <p style={styles.switchLink}>
-        Don't have an account yet?{" "}
+        Don&apos;t have an account yet?{" "}
         <Link href="/signup" style={styles.link}>
           Sign up here!
         </Link>

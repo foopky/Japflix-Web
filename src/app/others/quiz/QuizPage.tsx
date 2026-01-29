@@ -34,6 +34,41 @@ interface QuizResultRow {
   isCorrect: boolean;
 }
 
+interface SavedQuizResult {
+  ts: string;
+  config?: QuizConfiguration;
+  results: QuizResultRow[];
+  correctCount: number;
+  total: number;
+}
+
+type StylesType = {
+  container: React.CSSProperties;
+  card: React.CSSProperties;
+  title: React.CSSProperties;
+  subtitle: React.CSSProperties;
+  formSection: React.CSSProperties;
+  formLabel: React.CSSProperties;
+  row: React.CSSProperties;
+  rowCenter: React.CSSProperties;
+  select: React.CSSProperties;
+  input: React.CSSProperties;
+  modeButtonGroup: React.CSSProperties;
+  modeButton: (isActive: boolean) => React.CSSProperties;
+  button: React.CSSProperties;
+  gauge: React.CSSProperties;
+  gaugeFill: (pct: number) => React.CSSProperties;
+  quizHeader: React.CSSProperties;
+  options: React.CSSProperties;
+  optionBtn: React.CSSProperties;
+  textInput: React.CSSProperties;
+  navRow: React.CSSProperties;
+  secondaryBtn: React.CSSProperties;
+  resultRow: React.CSSProperties;
+  revealBtn: React.CSSProperties;
+  constraintText: React.CSSProperties;
+};
+
 export default function QuizPage(props: { userId: string; authToken: string }) {
   const { userId, authToken } = props;
 
@@ -61,7 +96,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
 
   // Saved results viewer
   const [showSavedPanel, setShowSavedPanel] = useState(false);
-  const [savedResults, setSavedResults] = useState<any[]>([]);
+  const [savedResults, setSavedResults] = useState<SavedQuizResult[]>([]);
 
   // Load folders if not provided
   useEffect(() => {
@@ -476,7 +511,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
         .split(";")
         .map((c) => c.trim())
         .find((c) => c.startsWith("quiz_results="));
-      let arr: any[] = [];
+      let arr: SavedQuizResult[] = [];
       if (cookie) {
         const value = decodeURIComponent(cookie.split("=")[1]);
         const parsed = JSON.parse(value);
@@ -1049,7 +1084,7 @@ function ResultRow({
 }: {
   row: QuizResultRow;
   index: number;
-  styles: any;
+  styles: StylesType;
 }) {
   const [show, setShow] = useState(false);
   return (

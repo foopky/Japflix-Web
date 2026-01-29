@@ -62,7 +62,7 @@ export default function TermsPage() {
         <section style={styles.section}>
           <h2 style={styles.sectionTitle}>6. Limitation of Liability</h2>
           <p style={styles.paragraph}>
-            This application is provided "as is" without any warranties. We
+            This application is provided &quot;as is&quot; without any warranties. We
             shall not be liable for any damages arising from the use or
             inability to use this application.
           </p>
