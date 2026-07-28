@@ -2,6 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import axios from "axios";
+import { api, useAccessToken } from "@/lib/api";
+import { getPasswordError, PASSWORD_MIN_LENGTH } from "@/lib/password";
+import PasswordChecklist from "@/app/component/PasswordChecklist";
 import { useRouter } from "next/navigation";
 
 interface User {
@@ -12,6 +15,8 @@ interface User {
   description: string;
 }
 
+const EMPTY_PASSWORDS = { current: "", next: "", confirm: "" };
+
 export default function SettingsPageClient({
   authToken,
   userId,
@@ -19,12 +24,15 @@ export default function SettingsPageClient({
   authToken: string;
   userId: string;
 }) {
+  useAccessToken(authToken);
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [description, setDescription] = useState("");
+  const [passwords, setPasswords] = useState(EMPTY_PASSWORDS);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     fetchUserData();
@@ -32,15 +40,7 @@ export default function SettingsPageClient({
 
   const fetchUserData = async () => {
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/api/users/${userId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const response = await api.get(`/api/users/${userId}`);
       if (response?.data) {
         setUser(response.data);
         setDescription(response.data.description || "");
@@ -54,26 +54,14 @@ export default function SettingsPageClient({
   };
 
   const handleLogout = async () => {
-    // try {
-    //   // Call logout endpoint if available
-    //   await axios.post(
-    //     `${process.env.NEXT_PUBLIC_API_HOST}/logout`,
-    //     {},
-    //     {
-    //       headers: {
-    //         Accept: "*/*",
-    //         Authorization: `Bearer ${authToken}`,
-    //       },
-    //     },
-    //   );
-    // } catch (error) {
-    //   console.error("Logout request failed:", error);
-    // }
-
-    // Clear cookies and redirect
-    document.cookie = "authToken=; path=/; max-age=0";
-    document.cookie = "userId=; path=/; max-age=0";
+    // authToken/userId are httpOnly, so they must be cleared server-side
+    try {
+      await axios.post("/api/clear-token");
+    } catch (error) {
+      console.error("Logout request failed:", error);
+    }
     router.push("/login");
+    router.refresh();
   };
 
   const handleDeleteAccount = async () => {
@@ -83,50 +71,133 @@ export default function SettingsPageClient({
     if (!confirmed) return;
 
     try {
-      await axios.delete(
-        `${process.env.NEXT_PUBLIC_API_HOST}/api/users/${userId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
-      alert("Account deleted successfully.");
-      // Clear cookies and redirect
-      document.cookie = "authToken=; path=/; max-age=0";
-      document.cookie = "userId=; path=/; max-age=0";
-      router.push("/login");
+      await api.delete(`/api/users/${userId}`);
     } catch (error) {
       console.error("Failed to delete account:", error);
       alert("Failed to delete account. Please try again.");
+      return;
     }
+
+    // The backend answers 200 even when it deletes nothing, so a status code is
+    // not proof. Read the record back: if it is still there, the account lives.
+    let stillExists = false;
+    try {
+      const check = await api.get(`/api/users/${userId}`);
+      stillExists = Boolean(check?.data);
+    } catch {
+      // Gone (or unreadable) is the outcome we wanted.
+    }
+
+    if (stillExists) {
+      alert(
+        "Account deletion did not go through. Your account is still active — please contact support.",
+      );
+      return;
+    }
+
+    // clear the httpOnly session cookies on the server before leaving
+    try {
+      await axios.post("/api/clear-token");
+    } catch (clearError) {
+      console.error("Failed to clear session cookies:", clearError);
+    }
+    alert("Account deleted successfully.");
+    router.push("/login");
+    router.refresh();
   };
 
-  const handleSaveDescription = async (e: FormEvent) => {
+  const resetForm = () => {
+    setDescription(user?.description || "");
+    setPasswords(EMPTY_PASSWORDS);
+    setError("");
+    setNotice("");
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
+    setError("");
+    setNotice("");
+
+    const descriptionChanged = description !== (user.description || "");
+    const wantsPasswordChange = Boolean(
+      passwords.current || passwords.next || passwords.confirm,
+    );
+
+    if (!descriptionChanged && !wantsPasswordChange) {
+      setNotice("Nothing to save.");
+      return;
+    }
+
+    if (wantsPasswordChange) {
+      if (!passwords.current) {
+        setError("Enter your current password to change it.");
+        return;
+      }
+      const passwordError = getPasswordError(passwords.next);
+      if (passwordError) {
+        setError(passwordError);
+        return;
+      }
+      if (passwords.next !== passwords.confirm) {
+        setError("New passwords do not match.");
+        return;
+      }
+      if (passwords.next === passwords.current) {
+        setError("New password must be different from the current one.");
+        return;
+      }
+    }
+
+    setIsSaving(true);
     try {
-      setIsSaving(true);
-      const updatedUser = { ...user, description };
-      await axios.put(
-        `${process.env.NEXT_PUBLIC_API_HOST}/api/users/${userId}`,
-        updatedUser,
-        {
-          headers: {
-            Accept: "*/*",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
-      setUser(updatedUser);
-      setIsEditing(false);
-      alert("Description updated successfully.");
-    } catch (error) {
-      console.error("Failed to update description:", error);
-      alert("Failed to update description.");
+      if (descriptionChanged) {
+        // PUT /api/users/{id} is a full replace that stores `password` verbatim
+        // — it never hashes. Sending a plaintext value, or omitting the field,
+        // writes that straight to the column and locks the account out, since
+        // login compares with BCrypt. Handing back the hash we read from GET is
+        // the only call that leaves the stored credential intact. Drop the
+        // field here once the backend stops accepting a password on this route.
+        const updatedUser = { ...user, description };
+        await api.put(`/api/users/${userId}`, updatedUser);
+        setUser(updatedUser);
+      }
+
+      if (wantsPasswordChange) {
+        await api.put(`/api/users/${userId}/password`, {
+          currentPassword: passwords.current,
+          newPassword: passwords.next,
+        });
+        setPasswords(EMPTY_PASSWORDS);
+        // The credential changed underneath this session — send the user back
+        // through login rather than leaving a token tied to the old password.
+        try {
+          await axios.post("/api/clear-token");
+        } catch (clearError) {
+          console.error("Failed to clear session cookies:", clearError);
+        }
+        alert("Password changed. Please log in again.");
+        router.push("/login");
+        router.refresh();
+        return;
+      }
+
+      setNotice("Saved.");
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+      // The password route reports a wrong current password as 400, not 401 —
+      // a 401 would trip the refresh interceptor in src/lib/api.ts and bounce
+      // the user to /login instead of showing the message.
+      if (
+        axios.isAxiosError(err) &&
+        err.response?.status === 400 &&
+        err.response.data?.error === "INVALID_PASSWORD"
+      ) {
+        setError("Current password is incorrect.");
+      } else {
+        setError("Failed to save changes. Please try again.");
+      }
     } finally {
       setIsSaving(false);
     }
@@ -150,6 +221,10 @@ export default function SettingsPageClient({
     );
   }
 
+  const isDirty =
+    description !== (user.description || "") ||
+    Boolean(passwords.current || passwords.next || passwords.confirm);
+
   return (
     <div style={styles.container}>
       <div style={styles.content}>
@@ -164,63 +239,130 @@ export default function SettingsPageClient({
           </button>
         </div>
 
-        {/* User Profile Section */}
+        {/* Profile + credentials, saved together */}
         <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Profile Information</h2>
+          <h2 style={styles.sectionTitle}>Profile & Account</h2>
 
-          {/* Username */}
-          <div style={styles.infoBlock}>
-            <label style={styles.label}>Username</label>
-            <div style={styles.displayValue}>{user.name}</div>
-          </div>
+          <form onSubmit={handleSubmit}>
+            <div style={styles.infoBlock}>
+              <label htmlFor="username" style={styles.label}>
+                Username
+              </label>
+              {/* Read-only, but a real input so password managers can tie the
+                  credential below to an account. */}
+              <input
+                type="text"
+                id="username"
+                name="username"
+                value={user.name}
+                readOnly
+                autoComplete="username"
+                style={{ ...styles.input, ...styles.readOnlyInput }}
+              />
+              <p style={styles.hint}>Your username cannot be changed.</p>
+            </div>
 
-          {/* Description - Editable */}
-          <div style={styles.infoBlock}>
-            <label style={styles.label}>Description</label>
-            {!isEditing ? (
-              <div style={styles.descriptionDisplay}>
-                <p style={styles.descriptionText}>
-                  {user.description || "(No description set)"}
-                </p>
-                <button
-                  onClick={() => setIsEditing(true)}
-                  style={{ ...styles.button, ...styles.secondaryButton }}
-                >
-                  Edit
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleSaveDescription}>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  style={styles.textarea}
-                  placeholder="Enter your description"
-                  maxLength={200}
-                />
-                <div style={styles.formActions}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditing(false);
-                      setDescription(user.description || "");
-                    }}
-                    style={{ ...styles.button, ...styles.secondaryButton }}
-                    disabled={isSaving}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    style={{ ...styles.button, ...styles.primaryButton }}
-                    disabled={isSaving}
-                  >
-                    {isSaving ? "Saving..." : "Save"}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
+            <div style={styles.infoBlock}>
+              <label htmlFor="description" style={styles.label}>
+                Description
+              </label>
+              <textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                style={styles.textarea}
+                placeholder="Enter your description"
+                maxLength={200}
+                disabled={isSaving}
+              />
+              <p style={styles.hint}>{description.length}/200</p>
+            </div>
+
+            <div style={styles.divider} />
+            <h3 style={styles.subTitle}>Change Password</h3>
+            <p style={styles.hint}>
+              Leave these blank to keep your current password.
+            </p>
+
+            <div style={styles.infoBlock}>
+              <label htmlFor="currentPassword" style={styles.label}>
+                Current Password
+              </label>
+              <input
+                type="password"
+                id="currentPassword"
+                name="currentPassword"
+                value={passwords.current}
+                onChange={(e) =>
+                  setPasswords({ ...passwords, current: e.target.value })
+                }
+                autoComplete="current-password"
+                style={styles.input}
+                placeholder="Enter your current password"
+                disabled={isSaving}
+              />
+            </div>
+
+            <div style={styles.infoBlock}>
+              <label htmlFor="newPassword" style={styles.label}>
+                New Password
+              </label>
+              <input
+                type="password"
+                id="newPassword"
+                name="newPassword"
+                value={passwords.next}
+                onChange={(e) =>
+                  setPasswords({ ...passwords, next: e.target.value })
+                }
+                autoComplete="new-password"
+                style={styles.input}
+                placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`}
+                disabled={isSaving}
+              />
+              <PasswordChecklist value={passwords.next} />
+            </div>
+
+            <div style={styles.infoBlock}>
+              <label htmlFor="confirmNewPassword" style={styles.label}>
+                Confirm New Password
+              </label>
+              <input
+                type="password"
+                id="confirmNewPassword"
+                name="confirmNewPassword"
+                value={passwords.confirm}
+                onChange={(e) =>
+                  setPasswords({ ...passwords, confirm: e.target.value })
+                }
+                autoComplete="new-password"
+                style={styles.input}
+                placeholder="Re-enter your new password"
+                disabled={isSaving}
+              />
+            </div>
+
+            {error && <p style={styles.errorText}>{error}</p>}
+            {notice && <p style={styles.noticeText}>{notice}</p>}
+
+            <div style={styles.formActions}>
+              <button
+                type="button"
+                onClick={resetForm}
+                style={{ ...styles.button, ...styles.secondaryButton }}
+                disabled={isSaving || !isDirty}
+              >
+                Reset
+              </button>
+              <button
+                type="submit"
+                style={{ ...styles.button, ...styles.primaryButton }}
+                disabled={isSaving || !isDirty}
+              >
+                {isSaving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </form>
         </section>
 
         {/* Account Section */}
@@ -318,6 +460,17 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "2px solid #e0f2fe",
     paddingBottom: 12,
   },
+  subTitle: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: "#0f172a",
+    marginBottom: 4,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#e2e8f0",
+    margin: "8px 0 20px",
+  },
   infoBlock: {
     marginBottom: 20,
   },
@@ -328,31 +481,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#475569",
     marginBottom: 8,
   },
-  displayValue: {
+  input: {
+    width: "100%",
     padding: "12px 14px",
-    backgroundColor: "#f8fafc",
-    border: "1px solid #e2e8f0",
+    border: "1px solid #cbd5e1",
     borderRadius: 8,
     fontSize: 15,
+    fontFamily: "inherit",
     color: "#0f172a",
+    boxSizing: "border-box",
   },
-  descriptionDisplay: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-  },
-  descriptionText: {
-    padding: "12px 14px",
+  readOnlyInput: {
     backgroundColor: "#f8fafc",
-    border: "1px solid #e2e8f0",
-    borderRadius: 8,
-    fontSize: 14,
     color: "#475569",
-    minHeight: 80,
-    lineHeight: 1.6,
-    margin: 0,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
+    cursor: "not-allowed",
   },
   textarea: {
     width: "100%",
@@ -364,6 +506,24 @@ const styles: Record<string, React.CSSProperties> = {
     resize: "vertical",
     minHeight: 100,
     boxSizing: "border-box",
+  },
+  hint: {
+    fontSize: 12,
+    color: "#94a3b8",
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  errorText: {
+    fontSize: 14,
+    color: "#d32f2f",
+    fontWeight: 600,
+    marginBottom: 8,
+  },
+  noticeText: {
+    fontSize: 14,
+    color: "#0369a1",
+    fontWeight: 600,
+    marginBottom: 8,
   },
   formActions: {
     display: "flex",

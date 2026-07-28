@@ -5,9 +5,9 @@ import ViewSentencesPage from "./ViewSentencesPage";
 export default async function Page({
   searchParams,
 }: {
-  searchParams: {
+  searchParams: Promise<{
     wordId: string | undefined;
-  };
+  }>;
 }) {
   const cookieStore = await cookies();
   const authToken = cookieStore.get("authToken")?.value;

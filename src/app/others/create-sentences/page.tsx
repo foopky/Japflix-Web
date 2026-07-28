@@ -5,10 +5,10 @@ import CreateSentencesPage from "./CreateSentencesPage";
 export default async function Page({
   searchParams,
 }: {
-  searchParams: {
+  searchParams: Promise<{
     wordId: string | undefined;
     word: string | undefined;
-  };
+  }>;
 }) {
   // 서버에서 쿠키 읽기
   const cookieStore = await cookies();

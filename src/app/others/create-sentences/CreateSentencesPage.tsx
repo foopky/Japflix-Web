@@ -1,5 +1,5 @@
 "use client";
-import axios from "axios";
+import { api, useAccessToken } from "@/lib/api";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CreateSentencesPageProps } from "../../../../types/contents";
@@ -21,6 +21,7 @@ export default function CreateSentencesPage({
   wordId,
   word,
 }: CreateSentencesPageProps) {
+  useAccessToken(authToken);
   const router = useRouter();
   const [sentences, setSentences] = useState<SentenceResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -43,19 +44,13 @@ export default function CreateSentencesPage({
   const fetchSentences = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/create_sentences`,
-        {
-          params: {
-            word: data.word,
-            language: data.language,
-            style: data.style,
-          },
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
+      const response = await api.get(`/create_sentences`, {
+        params: {
+          word: data.word,
+          language: data.language,
+          style: data.style,
         },
-      );
+      });
       setSentences(response.data);
     } catch (error) {
       alert("Error fetching sentences.");
@@ -73,21 +68,13 @@ export default function CreateSentencesPage({
   const saveSentenceClick = async (res: SentenceResponse, index: number) => {
     setSavingIndex(index);
     try {
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_HOST}/sentence`,
-        {
-          wordId: Number(wordId),
-          userId: Number(userId),
-          sentence_text: res.sentence,
-          style: data.style,
-          meaning: res.meaning,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      await api.post(`/sentence`, {
+        wordId: Number(wordId),
+        userId: Number(userId),
+        sentence_text: res.sentence,
+        style: data.style,
+        meaning: res.meaning,
+      });
       alert("Sentence saved successfully.");
       setSavedIndices(new Set([...savedIndices, index]));
     } catch (error) {
@@ -384,10 +371,10 @@ export default function CreateSentencesPage({
           onClick={() => router.back()}
           style={styles.backButton}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)";
+            e.currentTarget.style.background = "#e2e8f0";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+            e.currentTarget.style.background = "#f8fafc";
           }}
         >
           ← Back

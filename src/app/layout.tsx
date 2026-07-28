@@ -3,7 +3,7 @@ import Footer from "./component/footer";
 import "./globals.css";
 
 export const metadata = {
-  title: "My Vocabulary App",
+  title: "Japflix Voca",
 };
 
 export default function RootLayout({

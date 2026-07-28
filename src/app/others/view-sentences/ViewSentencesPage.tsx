@@ -1,5 +1,5 @@
 "use client";
-import axios from "axios";
+import { api, useAccessToken } from "@/lib/api";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
@@ -12,6 +12,7 @@ export default function ViewSentencesPage({
   authToken,
   wordId,
 }: ViewSentencesPageProps) {
+  useAccessToken(authToken);
   const router = useRouter();
   const [sentences, setSentences] = useState<SentenceResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -23,18 +24,12 @@ export default function ViewSentencesPage({
   const fetchWordSentences = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/sentence/by-user-and-word`,
-        {
-          params: {
-            userId: userId,
-            wordId: wordId,
-          },
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
+      const response = await api.get(`/sentence/by-user-and-word`, {
+        params: {
+          userId: userId,
+          wordId: wordId,
         },
-      );
+      });
       setSentences(response.data);
       if (response.data.length > 0) {
         setWordInfo({
@@ -53,14 +48,7 @@ export default function ViewSentencesPage({
   const fetchSentences = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/sentence/user/${userId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const response = await api.get(`/sentence/user/${userId}`);
       setSentences(response.data);
     } catch (error) {
       console.error("Failed to fetch sentences:", error);
@@ -246,10 +234,10 @@ export default function ViewSentencesPage({
           onClick={() => router.back()}
           style={styles.backButton}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)";
+            e.currentTarget.style.background = "#e2e8f0";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+            e.currentTarget.style.background = "#f8fafc";
           }}
         >
           ← Back

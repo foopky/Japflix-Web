@@ -18,8 +18,8 @@ export default function TermsPage() {
         <section style={styles.section}>
           <h2 style={styles.sectionTitle}>1. Acceptance of Terms</h2>
           <p style={styles.paragraph}>
-            By accessing and using this Vocabulary Application, you accept and
-            agree to be bound by the terms and provision of this agreement.
+            By accessing and using Japflix Voca, you accept and agree to be
+            bound by the terms and provision of this agreement.
           </p>
         </section>
 

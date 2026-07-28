@@ -31,7 +31,7 @@ export default function Footer() {
         {/* Copyright */}
         <div style={styles.copyright}>
           <p style={styles.copyrightText}>
-            © {new Date().getFullYear()} Vocabulary App. All rights reserved.
+            © {new Date().getFullYear()} Japflix Voca. All rights reserved.
           </p>
         </div>
       </div>

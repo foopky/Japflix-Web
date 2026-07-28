@@ -6,7 +6,8 @@ import {
   WordEntry,
   WordFolder,
 } from "../../../../types/contents";
-import axios from "axios";
+import { api, useAccessToken } from "@/lib/api";
+import { fetchWordsPage } from "@/lib/words";
 import { useSearchParams, useRouter } from "next/navigation";
 
 export default function SharedFolderPage(props: {
@@ -18,12 +19,20 @@ export default function SharedFolderPage(props: {
   const wordFolders = JSON.parse(searchParams.get("wordFolders") || "[]");
 
   const { authToken, userId } = props;
+  useAccessToken(authToken);
   const [sharedFolders, setSharedFolders] = useState<SharedFolder[]>([]); // show shared folders area
   const [shareFolderWords, setShareFolderWords] = useState<WordEntry[]>([]); // words in selected shared folder
   const [showViewSharedModal, setShowViewSharedModal] = useState(false);
   const [selectedSharedFolderName, setSelectedSharedFolderName] = useState<
     string | null
   >(null);
+  // the words modal pages through the folder instead of loading all of it
+  const [sharedWordsFolderId, setSharedWordsFolderId] = useState<number | null>(
+    null,
+  );
+  const [sharedWordsPage, setSharedWordsPage] = useState(1);
+  const [sharedWordsTotalPages, setSharedWordsTotalPages] = useState(0);
+  const [sharedWordsTotal, setSharedWordsTotal] = useState(0);
   const [mySharedFolders, setMySharedFolders] = useState<SharedFolder[]>([]);
   const [showMySharedModal, setShowMySharedModal] = useState(false);
 
@@ -63,16 +72,7 @@ export default function SharedFolderPage(props: {
 
   const fetchSharedFolder = async () => {
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/sharedFolder`,
-        {
-          headers: {
-            Accept: "*/*",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const response = await api.get(`/sharedFolder`);
       // backend returns created shared folder -> merge into state
       if (response?.data) {
         console.log(response.data);
@@ -126,17 +126,7 @@ export default function SharedFolderPage(props: {
         name: shareForm.name,
         language: shareForm.language,
       };
-      const resp = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_HOST}/sharedFolder`,
-        body,
-        {
-          headers: {
-            Accept: "*/*",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const resp = await api.post(`/sharedFolder`, body);
       if (resp?.data) {
         setSharedFolders((prev) => [resp.data, ...prev]);
       }
@@ -150,6 +140,15 @@ export default function SharedFolderPage(props: {
     }
   };
 
+  const loadSharedFolderWords = async (folderId: number, page: number) => {
+    const result = await fetchWordsPage(folderId, page - 1);
+    setShareFolderWords(result.content);
+    setSharedWordsPage(result.page + 1);
+    setSharedWordsTotalPages(result.totalPages);
+    setSharedWordsTotal(result.totalElements);
+    return result;
+  };
+
   // fetch and show words for a shared folder (opens modal)
   const viewSharedFolderWords = async (sharedFolder: SharedFolder) => {
     // sharedFolder.id shape may vary; support either { folderId } or number
@@ -159,22 +158,11 @@ export default function SharedFolderPage(props: {
       return;
     }
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/folder/getwords/${folderId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
-      const data = response?.data ?? [];
-      if (!data || data.length === 0) {
+      const result = await loadSharedFolderWords(folderId, 1);
+      setSharedWordsFolderId(folderId);
+      if (result.totalElements === 0) {
         // still show modal but inform user
-        setShareFolderWords([]);
         alert("No words in this shared folder.");
-      } else {
-        setShareFolderWords(data);
       }
       setSelectedSharedFolderName(
         sharedFolder.wordFolder?.name ?? "Shared Folder",
@@ -186,17 +174,34 @@ export default function SharedFolderPage(props: {
     }
   };
 
+  const changeSharedWordsPage = async (page: number) => {
+    if (!sharedWordsFolderId) return;
+    const target = Math.min(
+      Math.max(1, page),
+      Math.max(1, sharedWordsTotalPages),
+    );
+    if (target === sharedWordsPage) return;
+    try {
+      await loadSharedFolderWords(sharedWordsFolderId, target);
+    } catch (error) {
+      console.error("View shared folder words error:", error);
+      alert("Failed to load shared folder words.");
+    }
+  };
+
+  const closeSharedWordsModal = () => {
+    setShowViewSharedModal(false);
+    setShareFolderWords([]);
+    setSelectedSharedFolderName(null);
+    setSharedWordsFolderId(null);
+    setSharedWordsPage(1);
+    setSharedWordsTotalPages(0);
+    setSharedWordsTotal(0);
+  };
+
   const viewMySharedFolders = async () => {
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/sharedFolder/${userId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const response = await api.get(`/sharedFolder/${userId}`);
       if (!response?.data) {
         alert("No shared folders found for user.");
         return;
@@ -214,15 +219,7 @@ export default function SharedFolderPage(props: {
     );
     if (!ok) return;
     try {
-      await axios.delete(
-        `${process.env.NEXT_PUBLIC_API_HOST}/sharedFolder/${userId}/${sharedFolderId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      await api.delete(`/sharedFolder/${userId}/${sharedFolderId}`);
       await viewMySharedFolders(); // Refresh the list after deletion
       setSharedFolders((prev) =>
         prev.filter((sf) => sf.id.folderId !== sharedFolderId),
@@ -241,15 +238,9 @@ export default function SharedFolderPage(props: {
     const ok = window.confirm("Add this shared folder to my word folders?");
     if (!ok) return;
     try {
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_HOST}/folder/SharedFolderToMyWordFolder?userId=${userId}`,
+      await api.post(
+        `/folder/SharedFolderToMyWordFolder?userId=${userId}`,
         wordFolder,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
       );
     } catch (error) {
       console.error("Add shared folder to my folders error:", error);
@@ -259,15 +250,7 @@ export default function SharedFolderPage(props: {
   };
   const fetchFolders = async (): Promise<WordFolder[] | undefined> => {
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/folder/getfolderUser/${userId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const response = await api.get(`/folder/getfolderUser/${userId}`);
       const folderList: WordFolder[] = response.data;
       setFolders(folderList);
       if (folderList && folderList.length > 0) {
@@ -278,8 +261,8 @@ export default function SharedFolderPage(props: {
       }
       return folderList;
     } catch (error) {
-      console.error("폴더 불러오기 오류: ", error);
-      alert("폴더 불러오기 실패.");
+      console.error("Failed to fetch folders:", error);
+      alert("Failed to fetch folders.");
     }
   };
   return (
@@ -327,6 +310,12 @@ export default function SharedFolderPage(props: {
             <p style={styles.sectionSub}>Most recently shared folders.</p>
           </div>
         </div>
+        {sharedFolders.length === 0 && (
+          <div style={styles.emptyState}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>📂</div>
+            No shared folders have been posted yet. Be the first to share one!
+          </div>
+        )}
         <div style={styles.folderList}>
           {sharedFolders.map((folder) => (
             <div
@@ -455,14 +444,7 @@ export default function SharedFolderPage(props: {
 
       {/* View Shared Folder Words Modal */}
       {showViewSharedModal && (
-        <div
-          style={styles.modalOverlay}
-          onMouseDown={() => {
-            setShowViewSharedModal(false);
-            setShareFolderWords([]);
-            setSelectedSharedFolderName(null);
-          }}
-        >
+        <div style={styles.modalOverlay} onMouseDown={closeSharedWordsModal}>
           <div
             style={styles.modal}
             onMouseDown={(e) => {
@@ -507,13 +489,33 @@ export default function SharedFolderPage(props: {
               )}
             </div>
             <div style={styles.modalFooter}>
+              {sharedWordsTotalPages > 1 && (
+                <div style={styles.modalPager}>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    disabled={sharedWordsPage <= 1}
+                    onClick={() => changeSharedWordsPage(sharedWordsPage - 1)}
+                  >
+                    ‹ Prev
+                  </button>
+                  <span style={styles.modalPagerLabel}>
+                    {sharedWordsPage} / {sharedWordsTotalPages} ·{" "}
+                    {sharedWordsTotal} words
+                  </span>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    disabled={sharedWordsPage >= sharedWordsTotalPages}
+                    onClick={() => changeSharedWordsPage(sharedWordsPage + 1)}
+                  >
+                    Next ›
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  setShowViewSharedModal(false);
-                  setShareFolderWords([]);
-                  setSelectedSharedFolderName(null);
-                }}
+                onClick={closeSharedWordsModal}
                 style={styles.button}
               >
                 Close
@@ -706,6 +708,15 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
     gap: 16,
   },
+  emptyState: {
+    textAlign: "center",
+    padding: "40px 20px",
+    color: "#64748b",
+    fontSize: 15,
+    backgroundColor: "#f8fafc",
+    border: "1px dashed #cbd5e1",
+    borderRadius: 12,
+  },
   folderCard: {
     border: "1px solid #e2e8f0",
     borderRadius: 14,
@@ -781,8 +792,20 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "12px 16px",
     display: "flex",
     justifyContent: "flex-end",
+    alignItems: "center",
     gap: 10,
     borderTop: "1px solid #e2e8f0",
+  },
+  modalPager: {
+    marginRight: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  modalPagerLabel: {
+    fontSize: 13,
+    color: "#475569",
+    fontWeight: 600,
   },
   label: {
     display: "flex",

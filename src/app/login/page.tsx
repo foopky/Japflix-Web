@@ -1,6 +1,7 @@
 "use client";
 
 import axios from "axios";
+import { publicApi, setAccessToken } from "@/lib/api";
 import React, { useState, ChangeEvent, FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,6 +15,7 @@ interface LoginFormData {
 interface ResponseData {
   jwt: string;
   userId: number;
+  refreshToken: string;
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -85,6 +87,7 @@ export default function LoginPage() {
     username: "",
     password: "",
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const router = useRouter();
 
@@ -101,10 +104,9 @@ export default function LoginPage() {
     e.preventDefault();
     const login = async () => {
       try {
-        const response = await axios.post(
-          `${process.env.NEXT_PUBLIC_API_HOST}/api/auth/login`,
-          formData,
-        );
+        // publicApi: a 401 here means bad credentials, not an expired token,
+        // so it must not go through the refresh interceptor.
+        const response = await publicApi.post(`/api/auth/login`, formData);
         return response.data;
       } catch (error) {
         console.error("Login error: ", error);
@@ -116,6 +118,9 @@ export default function LoginPage() {
         // 1. 클라이언트가 받은 토큰을 Next.js 서버(API Route)로 전송
         await axios.post("/api/set-token", responseData);
 
+        // 인터셉터가 쓰는 메모리 토큰도 즉시 세팅 (쿠키 왕복을 기다리지 않도록)
+        setAccessToken(responseData.jwt);
+
         // 강제로 서버 컴포넌트 재생성 -> 쿠키가 반영된 WordbookClient가 다시 렌더링됩니다.
         router.refresh();
 
@@ -125,11 +130,14 @@ export default function LoginPage() {
       }
     };
 
-    // TODO: 여기에 실제 회원가입 API 호출 로직을 구현합니다.
+    setIsSubmitting(true);
     const responseData: ResponseData = await login();
     if (responseData) {
       await handleLoginSuccess(responseData);
       router.push("/");
+    } else {
+      // login failed (alert already shown) -> re-enable the form
+      setIsSubmitting(false);
     }
   };
 
@@ -148,6 +156,7 @@ export default function LoginPage() {
             value={formData.username}
             onChange={handleChange}
             required
+            autoComplete="username"
             style={styles.input}
             placeholder="Type your username"
           />
@@ -164,13 +173,21 @@ export default function LoginPage() {
             value={formData.password}
             onChange={handleChange}
             required
+            autoComplete="current-password"
             style={styles.input}
             placeholder="Type your password"
           />
         </div>
 
-        <button type="submit" style={styles.button}>
-          Login
+        <button
+          type="submit"
+          style={{
+            ...styles.button,
+            ...(isSubmitting ? { opacity: 0.6, cursor: "not-allowed" } : {}),
+          }}
+          disabled={isSubmitting}
+        >
+          {isSubmitting ? "Logging in..." : "Login"}
         </button>
       </form>
       <p style={styles.switchLink}>

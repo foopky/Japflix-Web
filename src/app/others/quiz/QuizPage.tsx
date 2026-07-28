@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
+import { api, useAccessToken } from "@/lib/api";
+import { fetchAllWords, fetchWordCount } from "@/lib/words";
 import type { WordEntry, WordFolder } from "../../../../types/contents";
 import { useSearchParams } from "next/navigation";
 
@@ -71,13 +72,13 @@ type StylesType = {
 
 export default function QuizPage(props: { userId: string; authToken: string }) {
   const { userId, authToken } = props;
+  useAccessToken(authToken);
 
   const searchParams = useSearchParams();
   const wordFolders = JSON.parse(searchParams.get("wordFolders") || "[]");
 
   // Data
   const [folders, setFolders] = useState<WordFolder[]>(wordFolders ?? []);
-  const [words, setWords] = useState<WordEntry[]>([]);
 
   // Config + quiz state
   const [phase, setPhase] = useState<Phase>("config");
@@ -98,39 +99,35 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
   const [showSavedPanel, setShowSavedPanel] = useState(false);
   const [savedResults, setSavedResults] = useState<SavedQuizResult[]>([]);
 
+  // Only the count is needed to bound the "number of questions" input, so this
+  // asks for a single row and reads totalElements instead of pulling the folder.
+  const loadWordCount = async (folderId: number) => {
+    try {
+      const count = await fetchWordCount(folderId);
+      setMaxAvailableQuestions(count);
+      setConfig((c) => ({
+        ...c,
+        numberOfQuestions: Math.min(c.numberOfQuestions, count),
+      }));
+    } catch (e) {
+      console.error("Fetch word count error", e);
+      setMaxAvailableQuestions(0);
+    }
+  };
+
   // Load folders if not provided
   useEffect(() => {
     const loadFolders = async () => {
       if (folders.length > 0) return;
       console.log("Loading folders from server...");
       try {
-        const resp = await axios.get(
-          `${process.env.NEXT_PUBLIC_API_HOST}/folder/getfolderUser/${userId}`,
-          {
-            headers: {
-              Accept: "*/*",
-              Authorization: `Bearer ${authToken}`,
-            },
-          },
-        );
+        const resp = await api.get(`/folder/getfolderUser/${userId}`);
         const list: WordFolder[] = resp.data ?? [];
         setFolders(list);
         if (list.length > 0) {
           const firstFolderId = list[0].id;
           setConfig((c) => ({ ...c, folderId: firstFolderId }));
-          // Fetch words for the first folder to set maxAvailableQuestions
-          const wordsResp = await axios.get(
-            `${process.env.NEXT_PUBLIC_API_HOST}/folder/getwords/${firstFolderId}`,
-            {
-              headers: {
-                Accept: "*/*",
-                Authorization: `Bearer ${authToken}`,
-              },
-            },
-          );
-          const wordList: WordEntry[] = wordsResp.data ?? [];
-          setWords(wordList);
-          setMaxAvailableQuestions(wordList.length);
+          await loadWordCount(firstFolderId);
         }
       } catch (err) {
         console.error("Load folders error", err);
@@ -139,19 +136,15 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
     loadFolders();
   }, [authToken, userId]);
 
-  // Load saved results from cookie
+  // Load saved results from localStorage (cookies are limited to ~4KB)
   useEffect(() => {
     try {
-      const cookie = document.cookie
-        .split(";")
-        .map((c) => c.trim())
-        .find((c) => c.startsWith("quiz_results="));
-      if (cookie) {
-        const value = decodeURIComponent(cookie.split("=")[1]);
-        const parsed = JSON.parse(value);
+      const raw = window.localStorage.getItem("quiz_results");
+      if (raw) {
+        const parsed = JSON.parse(raw);
         setSavedResults(Array.isArray(parsed) ? parsed : []);
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   }, []);
@@ -352,20 +345,11 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
     [],
   );
 
-  const fetchWords = async (folderId: number) => {
+  // The quiz samples questions and builds distractors from the whole folder,
+  // so this is one of the few places that legitimately needs every word.
+  const fetchWords = async (folderId: number): Promise<WordEntry[]> => {
     try {
-      const resp = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/folder/getwords/${folderId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
-      const list: WordEntry[] = resp.data ?? [];
-      setWords(list);
-      return list;
+      return await fetchAllWords(folderId);
     } catch (e) {
       console.error("Fetch words error", e);
       alert("Failed to fetch words.");
@@ -461,6 +445,15 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
   };
 
   const next = () => {
+    const answer = answers[currentIndex];
+    const unanswered =
+      answer === null || (typeof answer === "string" && answer.trim() === "");
+    if (unanswered) {
+      const ok = window.confirm(
+        "You haven't answered this question yet. Skip it anyway?",
+      );
+      if (!ok) return;
+    }
     if (currentIndex < questions.length - 1) setCurrentIndex((i) => i + 1);
     else finalize();
   };
@@ -498,7 +491,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
 
   const correctCount = results.filter((r) => r.isCorrect).length;
 
-  const saveResultsToCookie = () => {
+  const saveResults = () => {
     const entry = {
       ts: new Date().toISOString(),
       config,
@@ -507,27 +500,18 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
       total: results.length,
     };
     try {
-      const cookie = document.cookie
-        .split(";")
-        .map((c) => c.trim())
-        .find((c) => c.startsWith("quiz_results="));
+      const raw = window.localStorage.getItem("quiz_results");
       let arr: SavedQuizResult[] = [];
-      if (cookie) {
-        const value = decodeURIComponent(cookie.split("=")[1]);
-        const parsed = JSON.parse(value);
+      if (raw) {
+        const parsed = JSON.parse(raw);
         arr = Array.isArray(parsed) ? parsed : [];
       }
       arr.unshift(entry);
       if (arr.length > 10) arr = arr.slice(0, 10);
-      const serialized = encodeURIComponent(JSON.stringify(arr));
-      // 30-day cookie
-      const expires = new Date(
-        Date.now() + 30 * 24 * 3600 * 1000,
-      ).toUTCString();
-      document.cookie = `quiz_results=${serialized}; expires=${expires}; path=/`;
+      window.localStorage.setItem("quiz_results", JSON.stringify(arr));
       setSavedResults(arr);
       alert("Quiz results have been saved.");
-    } catch (e) {
+    } catch {
       alert("Failed to save results.");
     }
   };
@@ -593,15 +577,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
                     : null;
                   setConfig((c) => ({ ...c, folderId }));
                   if (folderId) {
-                    const list = await fetchWords(folderId);
-                    setMaxAvailableQuestions(list.length);
-                    setConfig((c) => ({
-                      ...c,
-                      numberOfQuestions: Math.min(
-                        c.numberOfQuestions,
-                        list.length,
-                      ),
-                    }));
+                    await loadWordCount(folderId);
                   } else {
                     setMaxAvailableQuestions(0);
                   }
@@ -1055,7 +1031,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
               </button>
               <button
                 style={styles.button}
-                onClick={saveResultsToCookie}
+                onClick={saveResults}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = "translateY(-2px)";
                   e.currentTarget.style.boxShadow =

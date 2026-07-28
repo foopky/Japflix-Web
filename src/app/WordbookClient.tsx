@@ -2,18 +2,28 @@
 
 import React, { FormEvent, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
+import { api, useAccessToken } from "@/lib/api";
+import { WORDS_PAGE_SIZE, fetchWordsPage } from "@/lib/words";
 import type {
   WordEntry,
   WordFolder,
   WordInput,
   WordbookClientProps,
 } from "../../types/contents";
+import OnboardingGuide, {
+  markGuideAsSeen,
+  shouldShowGuide,
+} from "./component/OnboardingGuide";
+
+// created automatically so a new user always has somewhere to put words
+const DEFAULT_FOLDER_NAME = "(Default)";
+const DEFAULT_FOLDER_LANGUAGE = "japanese";
 
 export default function WordbookPage({
   authToken,
   userId,
 }: WordbookClientProps) {
+  useAccessToken(authToken);
   const router = useRouter();
   const [words, setWords] = useState<WordEntry[]>([]);
   const [addWord, setAddWord] = useState<WordInput | null>(null);
@@ -21,18 +31,26 @@ export default function WordbookPage({
   const [folders, setFolders] = useState<WordFolder[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [CURRENT_DIRECTORY, setCURRENT_DIRECTORY] = useState("MY FOLDER");
+  // 1-based for the UI; the backend is 0-based. `words` holds only the page
+  // currently on screen, so totals have to come from the server.
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalWordCount, setTotalWordCount] = useState(0);
   const quickMenuItems = [
     "Shared folder",
     "Sentence Lists",
     "Test",
     "Settings",
+    "How to use",
   ];
+  const [showGuide, setShowGuide] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   // ref for header checkbox (to support indeterminate state)
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // guards against creating "(Default)" twice (e.g. StrictMode double mount)
+  const creatingDefaultFolderRef = useRef(false);
   const allChecked = words.length > 0 && checkedWordIds.length === words.length;
 
   // keep header checkbox indeterminate when some items are selected
@@ -89,15 +107,7 @@ export default function WordbookPage({
   // fetch folders for initial load (extracted so it can be reused)
   const fetchFolders = async (): Promise<WordFolder[] | undefined> => {
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/folder/getfolderUser/${userId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const response = await api.get(`/folder/getfolderUser/${userId}`);
       const folderList: WordFolder[] = response.data;
       setFolders(folderList);
       if (folderList && folderList.length > 0) {
@@ -113,24 +123,52 @@ export default function WordbookPage({
     }
   };
 
-  // fetch words for a given folder id (can be reused)
-  const fetchWords = async (folderId: number | null) => {
+  // a user with no directory at all cannot add a word, so give them one
+  const ensureDefaultFolder = async (
+    folderList: WordFolder[] | undefined,
+  ): Promise<WordFolder[] | undefined> => {
+    if (!folderList || folderList.length > 0) return folderList;
+    if (creatingDefaultFolderRef.current) return folderList;
+    creatingDefaultFolderRef.current = true;
+    try {
+      await api.post(
+        `/folder/wordfolder?user_id=${encodeURIComponent(userId)}`,
+        {
+          name: DEFAULT_FOLDER_NAME,
+          language: DEFAULT_FOLDER_LANGUAGE,
+        },
+      );
+      return await fetchFolders();
+    } catch (error) {
+      console.error("Failed to create the default folder:", error);
+      return folderList;
+    } finally {
+      // released once the call settles, so deleting the last directory
+      // can trigger the default folder again
+      creatingDefaultFolderRef.current = false;
+    }
+  };
+
+  const resetWordList = () => {
+    setWords([]);
+    setTotalPages(0);
+    setTotalWordCount(0);
+    setCurrentPage(1);
+  };
+
+  // fetch a single page of words for a folder. `page` is 1-based (UI numbering)
+  const fetchWords = async (folderId: number | null, page = 1) => {
     if (!folderId) {
-      setWords([]);
+      resetWordList();
       return;
     }
     try {
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_HOST}/folder/getwords/${folderId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
-      const wordEntries: WordEntry[] = response.data;
-      setWords(wordEntries);
+      const result = await fetchWordsPage(folderId, page - 1);
+      setWords(result.content);
+      setTotalPages(result.totalPages);
+      setTotalWordCount(result.totalElements);
+      // trust the server's page number in case it clamped ours
+      setCurrentPage(result.page + 1);
     } catch (error) {
       console.error("Failed to fetch words:", error);
       alert("Failed to fetch words.");
@@ -138,15 +176,32 @@ export default function WordbookPage({
   };
 
   useEffect(() => {
-    fetchFolders().then((folders) => {
-      if (folders && folders.length > 0) {
-        // fetch words for the first folder (or currentFolderId if already set)
-        const initialFolderId = currentFolderId ?? folders[0].id;
-        setCurrentFolderId(initialFolderId);
-        fetchWords(initialFolderId);
+    const bootstrap = async () => {
+      try {
+        // a brand new account has no directory yet -> create "(Default)"
+        const folderList = await ensureDefaultFolder(await fetchFolders());
+        if (folderList && folderList.length > 0) {
+          // fetch words for the first folder (or currentFolderId if already set)
+          const initialFolderId = currentFolderId ?? folderList[0].id;
+          setCurrentFolderId(initialFolderId);
+          await fetchWords(initialFolderId);
+        }
+      } finally {
+        setIsInitialLoading(false);
       }
-    });
+    };
+    bootstrap();
   }, [authToken, userId]);
+
+  // show the usage guide the first time someone lands on the wordbook
+  useEffect(() => {
+    if (shouldShowGuide()) setShowGuide(true);
+  }, []);
+
+  const handleCloseGuide = () => {
+    markGuideAsSeen();
+    setShowGuide(false);
+  };
 
   // keep CURRENT_DIRECTORY in sync with the selected folder name
   useEffect(() => {
@@ -200,16 +255,7 @@ export default function WordbookPage({
     e.preventDefault();
     if (!addWord) return;
     try {
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_HOST}/words`,
-        addWord,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const response = await api.post(`/words`, addWord);
       const created: WordEntry = response?.data || {
         id: Date.now(),
         ...addWord,
@@ -220,24 +266,12 @@ export default function WordbookPage({
           const lang = (created.language || addWord.language || "english")
             .toString()
             .toLowerCase();
-          await axios.post(
-            `${
-              process.env.NEXT_PUBLIC_API_HOST
-            }/folder/addwordtofolder/${encodeURIComponent(lang)}/${
+          await api.post(
+            `/folder/addwordtofolder/${encodeURIComponent(lang)}/${
               created.id
             }/${addWordFolderId}`,
             {},
-            {
-              headers: {
-                Accept: "*/*",
-                Authorization: `Bearer ${authToken}`,
-              },
-            },
           );
-          // if the created word was added to the currently displayed folder, refresh list
-          if (addWordFolderId === currentFolderId && currentFolderId) {
-            await fetchWords(currentFolderId);
-          }
         } catch (err) {
           console.error("addwordtofolder failed:", err);
           alert("Failed to add word to folder.");
@@ -246,6 +280,8 @@ export default function WordbookPage({
       // setWords((prev) => [created, ...prev]);
       setShowAddForm(false);
       setAddWord(null);
+      // refresh the page we're on so the totals stay right
+      await fetchWords(currentFolderId, currentPage);
       alert("Word successfully added.");
     } catch (error) {
       console.error("Word add error: ", error);
@@ -256,12 +292,12 @@ export default function WordbookPage({
   // when user selects a folder to view, update currentFolderId and reload words
   const handleSelectFolderForView = async (folderId: number | null) => {
     setCurrentFolderId(folderId);
-    setCurrentPage(1);
+    setCheckedWordIds([]);
     if (folderId === null) {
-      setWords([]);
+      resetWordList();
       return;
     }
-    await fetchWords(folderId);
+    await fetchWords(folderId, 1);
   };
 
   // --- Create Directory handlers ---
@@ -280,29 +316,17 @@ export default function WordbookPage({
   const submitCreateDirectory = async (e?: FormEvent) => {
     if (e) e.preventDefault();
     if (!folderForm.name.trim()) {
-      alert("폴더 이름을 입력하세요.");
+      alert("Please enter a folder name.");
       return;
     }
     try {
       setCreating(true);
       // POST to backend (matches the curl you provided)
-      const url = `${
-        process.env.NEXT_PUBLIC_API_HOST
-      }/folder/wordfolder?user_id=${encodeURIComponent(userId)}`;
-      const response = await axios.post(
-        url,
-        {
-          name: folderForm.name,
-          language: folderForm.language,
-        },
-        {
-          headers: {
-            Accept: "*/*",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
+      const url = `/folder/wordfolder?user_id=${encodeURIComponent(userId)}`;
+      await api.post(url, {
+        name: folderForm.name,
+        language: folderForm.language,
+      });
       // refresh folder list after creation
       await fetchFolders();
       setShowCreateModal(false);
@@ -314,35 +338,43 @@ export default function WordbookPage({
       setCreating(false);
     }
   };
-  const handleDeleteWord = () => {
+  const handleDeleteWord = async () => {
     if (checkedWordIds.length === 0) {
       alert("Please select at least one word to delete.");
       return;
     }
     if (
-      window.confirm(
+      !window.confirm(
         `Are you sure you want to delete the selected ${checkedWordIds.length} words?`,
       )
     ) {
-      for (const id of checkedWordIds) {
-        axios.delete(`${process.env.NEXT_PUBLIC_API_HOST}/words`, {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-          data: {
-            wordId: id,
-            folderId: currentFolderId,
-          },
-        });
-      }
-
-      const newWords = words.filter(
-        (word) => !checkedWordIds.includes(word.id),
+      return;
+    }
+    try {
+      // wait for every delete so we don't clear the list on a failed request
+      await Promise.all(
+        checkedWordIds.map((id) =>
+          api.delete(`/words`, {
+            data: {
+              wordId: id,
+              folderId: currentFolderId,
+            },
+          }),
+        ),
       );
-      setWords(newWords);
+      const deletedCount = checkedWordIds.length;
       setCheckedWordIds([]);
+      // deleting the last rows of the last page removes the page itself, so
+      // step back rather than landing on an empty one
+      const remaining = Math.max(0, totalWordCount - deletedCount);
+      const lastPage = Math.max(1, Math.ceil(remaining / WORDS_PAGE_SIZE));
+      await fetchWords(currentFolderId, Math.min(currentPage, lastPage));
       alert("Words deleted.");
+    } catch (error) {
+      console.error("Failed to delete words:", error);
+      alert("Failed to delete some words. Please try again.");
+      // resync so partially-deleted state is reflected correctly
+      await fetchWords(currentFolderId, currentPage);
     }
   };
 
@@ -363,7 +395,8 @@ export default function WordbookPage({
     }
     const folder = folders.find((f) => f.id === currentFolderId);
     const folderName = folder?.name ?? `folder ${currentFolderId}`;
-    if (words.length > 0) {
+    // must be the folder-wide count: `words` is only the page on screen
+    if (totalWordCount > 0) {
       alert("Please delete all words in the directory before deleting it.");
       return;
     }
@@ -372,22 +405,17 @@ export default function WordbookPage({
     );
     if (!ok) return;
     try {
-      await axios.delete(
-        `${process.env.NEXT_PUBLIC_API_HOST}/folder/${currentFolderId}`,
-        {
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${authToken}`,
-          },
-        },
-      );
-      const updated = await fetchFolders();
+      await api.delete(`/folder/${currentFolderId}`);
+      // if that was the last directory, put "(Default)" back so the
+      // wordbook never ends up in an unusable state
+      const updated = await ensureDefaultFolder(await fetchFolders());
       if (updated && updated.length > 0) {
         const newId = updated[0].id;
         setCurrentFolderId(newId);
+        await fetchWords(newId, 1);
       } else {
         setCurrentFolderId(null);
-        setWords([]);
+        resetWordList();
       }
       alert("Directory deleted.");
     } catch (err) {
@@ -397,24 +425,21 @@ export default function WordbookPage({
   };
 
   const handleQuickMenuSelect = (label: string) => {
+    // NOTE: folders are intentionally NOT passed in the URL. WordFolder embeds
+    // the User object (incl. password), and each destination fetches its own
+    // folders, so putting them in the query string would leak that data into
+    // the address bar, browser history and server logs.
     if (label === "Shared folder") {
-      const query = new URLSearchParams({
-        wordFolders: JSON.stringify(folders),
-      });
-      router.push(`/others/shared-folder?${query.toString()}`);
+      router.push(`/others/shared-folder`);
     } else if (label === "Sentence Lists") {
-      const query = new URLSearchParams({
-        wordFolders: JSON.stringify(folders),
-      });
-      router.push(`/others/view-sentences?${query.toString()}`);
+      router.push(`/others/view-sentences`);
     } else if (label === "Test") {
-      const query = new URLSearchParams({
-        wordFolders: JSON.stringify(folders),
-      });
-      router.push(`/others/quiz?${query.toString()}`);
+      router.push(`/others/quiz`);
     } else if (label === "Chrome Extension") {
     } else if (label === "Settings") {
       router.push(`/others/settings`);
+    } else if (label === "How to use") {
+      setShowGuide(true);
     }
     setIsMenuOpen(false);
   };
@@ -437,26 +462,45 @@ export default function WordbookPage({
   const handleLearnedClick = (word: WordEntry) => {
     word.learned = !word.learned;
     setWords([...words]);
-    axios.put(`${process.env.NEXT_PUBLIC_API_HOST}/words`, word, {
-      headers: {
-        Accept: "*/*",
-        Authorization: `Bearer ${authToken}`,
-      },
-    });
+    api.put(`/words`, word);
   };
 
-  // Pagination calculations
-  const totalPages = Math.ceil(words.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const currentWords = words.slice(startIndex, endIndex);
+  // Kundoku/Ondoku only make sense for Japanese, so hide them otherwise
+  const currentFolder = folders.find((f) => f.id === currentFolderId);
+  const showJapaneseColumns = (currentFolder?.language ?? "")
+    .toLowerCase()
+    .includes("japan");
 
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
+  // Pagination is server-side: `words` is already exactly one page, and
+  // totalPages/totalWordCount come from the response envelope.
+  const pageCount = Math.max(1, totalPages);
+
+  // sliding window of page numbers (max 10), kept centered on the current page
+  const PAGE_WINDOW = 10;
+  const pageStart =
+    pageCount <= PAGE_WINDOW
+      ? 1
+      : Math.min(
+          Math.max(1, currentPage - Math.floor(PAGE_WINDOW / 2)),
+          pageCount - PAGE_WINDOW + 1,
+        );
+  const pageNumbers = Array.from(
+    { length: Math.min(PAGE_WINDOW, pageCount) },
+    (_, i) => pageStart + i,
+  );
+
+  const handlePageChange = async (page: number) => {
+    const target = Math.min(Math.max(1, page), pageCount);
+    if (target === currentPage) return;
+    // selection is per page — carrying it over would let a user delete rows
+    // they can no longer see
+    setCheckedWordIds([]);
+    await fetchWords(currentFolderId, target);
   };
 
   return (
     <div style={styles.container}>
+      <OnboardingGuide open={showGuide} onClose={handleCloseGuide} />
       <div style={styles.menuWrapper} ref={menuRef}>
         <button
           type="button"
@@ -489,7 +533,7 @@ export default function WordbookPage({
       </div>
       {/* Top Area (Header and Buttons) */}
       <header style={styles.header}>
-        <h1 style={styles.title}>My Vocabulary Web</h1>
+        <h1 style={styles.title}>Japflix Voca</h1>
         <div style={styles.buttonGroup}>
           <button
             onClick={handleAddWord}
@@ -766,8 +810,16 @@ export default function WordbookPage({
                 <th style={{ ...styles.tableHeader, width: "15%" }}>Word</th>
                 <th style={{ ...styles.tableHeader, width: "25%" }}>Meaning</th>
                 <th style={{ ...styles.tableHeader, width: "5%" }}>Learned</th>
-                <th style={{ ...styles.tableHeader, width: "10%" }}>Kundoku</th>
-                <th style={{ ...styles.tableHeader, width: "10%" }}>Ondoku</th>
+                {showJapaneseColumns && (
+                  <>
+                    <th style={{ ...styles.tableHeader, width: "10%" }}>
+                      Kundoku
+                    </th>
+                    <th style={{ ...styles.tableHeader, width: "10%" }}>
+                      Ondoku
+                    </th>
+                  </>
+                )}
                 <th style={{ ...styles.tableHeader, width: "17%" }}>
                   Pronunciation
                 </th>
@@ -777,7 +829,9 @@ export default function WordbookPage({
                     width: "10%",
                     textAlign: "center",
                   }}
-                ></th>
+                >
+                  Add Sentence
+                </th>
                 <th
                   style={{
                     ...styles.tableHeader,
@@ -790,7 +844,7 @@ export default function WordbookPage({
               </tr>
             </thead>
             <tbody>
-              {currentWords.map((word) => (
+              {words.map((word) => (
                 <tr key={word.id} style={styles.dataRow}>
                   <td style={styles.checkboxCell}>
                     <input
@@ -812,8 +866,12 @@ export default function WordbookPage({
                       onChange={() => handleLearnedClick(word)}
                     />
                   </td>
-                  <td style={styles.tableCell}>{word.kundoku}</td>
-                  <td style={styles.tableCell}>{word.ondoku}</td>
+                  {showJapaneseColumns && (
+                    <>
+                      <td style={styles.tableCell}>{word.kundoku}</td>
+                      <td style={styles.tableCell}>{word.ondoku}</td>
+                    </>
+                  )}
                   <td style={styles.tableCell}>{word.pronunciation}</td>
                   <td style={{ ...styles.tableCell, textAlign: "center" }}>
                     <button
@@ -840,19 +898,30 @@ export default function WordbookPage({
             </tbody>
           </table>
         </div>
-        {words.length === 0 && (
-          <div style={styles.noData}>
-            There are no words in the current directory.
-          </div>
+        {isInitialLoading ? (
+          <div style={styles.noData}>Loading...</div>
+        ) : (
+          words.length === 0 && (
+            <div style={styles.noData}>
+              There are no words in the current directory.
+            </div>
+          )
         )}
 
         {/* Pagination */}
-        {words.length > 0 && (
+        {totalPages > 1 && (
           <div style={styles.pagination}>
-            {Array.from(
-              { length: Math.min(totalPages, 10) },
-              (_, i) => i + 1,
-            ).map((page) => (
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              style={{
+                ...styles.pageButton,
+                ...(currentPage === 1 ? styles.pageButtonDisabled : {}),
+              }}
+            >
+              ‹ Prev
+            </button>
+            {pageNumbers.map((page) => (
               <button
                 key={page}
                 onClick={() => handlePageChange(page)}
@@ -864,11 +933,19 @@ export default function WordbookPage({
                 {page}
               </button>
             ))}
-            {totalPages > 10 && (
-              <span style={styles.pageEllipsis}>
-                ... ({totalPages} pages total)
-              </span>
-            )}
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage === pageCount}
+              style={{
+                ...styles.pageButton,
+                ...(currentPage === pageCount ? styles.pageButtonDisabled : {}),
+              }}
+            >
+              Next ›
+            </button>
+            <span style={styles.pageEllipsis}>
+              Page {currentPage} / {pageCount} · {totalWordCount} words
+            </span>
           </div>
         )}
       </section>
@@ -888,9 +965,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
+    gap: "16px",
     marginBottom: "30px",
     borderBottom: "2px solid #eee",
     paddingBottom: "10px",
+    // reserve space so the fixed hamburger button never covers the buttons
+    paddingRight: "64px",
   },
   title: {
     fontSize: "28px",
@@ -899,6 +980,7 @@ const styles: Record<string, React.CSSProperties> = {
   buttonGroup: {
     display: "flex",
     gap: "10px",
+    flexWrap: "wrap",
   },
   menuWrapper: {
     position: "fixed",
@@ -1005,7 +1087,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "#e6f7ff",
   },
   scrollWrapper: {
-    overflowY: "visible",
+    // let the wide table scroll inside its own box instead of the whole page
+    overflowX: "auto",
     border: "1px solid #ddd",
     borderRadius: "8px",
     width: "100%",
@@ -1092,6 +1175,11 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "#03a9fc",
     color: "#fff",
     border: "1px solid #03a9fc",
+  },
+  pageButtonDisabled: {
+    opacity: 0.45,
+    cursor: "not-allowed",
+    backgroundColor: "#f8fafc",
   },
   pageEllipsis: {
     marginLeft: "8px",

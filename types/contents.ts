@@ -19,6 +19,17 @@ export interface WordEntry {
   example: string;
 }
 
+/** Spring PagedModel envelope. `page` is 0-based. */
+export interface Page<T> {
+  content: T[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  first: boolean;
+  last: boolean;
+}
+
 export interface WordInput {
   language: string;
   pos: string;
