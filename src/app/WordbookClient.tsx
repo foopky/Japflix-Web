@@ -4,6 +4,14 @@ import React, { FormEvent, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api, useAccessToken } from "@/lib/api";
 import { WORDS_PAGE_SIZE, fetchWordsPage } from "@/lib/words";
+import {
+  DEFAULT_MEANING_LANGUAGE,
+  MEANING_LANGUAGES,
+  detectMeaningLanguage,
+  matchesMeaningLanguage,
+  meaningLanguageSuffix,
+  meaningLanguagesIn,
+} from "@/lib/languages";
 import type {
   WordEntry,
   WordFolder,
@@ -45,6 +53,8 @@ export default function WordbookPage({
   ];
   const [showGuide, setShowGuide] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  // "" = show every folder regardless of the language its meanings are in
+  const [meaningLanguageFilter, setMeaningLanguageFilter] = useState("");
 
   // ref for header checkbox (to support indeterminate state)
   const selectAllRef = useRef<HTMLInputElement | null>(null);
@@ -99,9 +109,11 @@ export default function WordbookPage({
   const [folderForm, setFolderForm] = useState<{
     name: string;
     language: string;
+    meaningLanguage: string;
   }>({
     name: "",
     language: "japanese",
+    meaningLanguage: DEFAULT_MEANING_LANGUAGE,
   });
 
   // fetch folders for initial load (extracted so it can be reused)
@@ -136,6 +148,9 @@ export default function WordbookPage({
         {
           name: DEFAULT_FOLDER_NAME,
           language: DEFAULT_FOLDER_LANGUAGE,
+          // nobody gets to pick for the auto-created folder, so guess from the
+          // browser locale
+          meaningLanguage: detectMeaningLanguage(),
         },
       );
       return await fetchFolders();
@@ -289,6 +304,13 @@ export default function WordbookPage({
     }
   };
 
+  // folders whose meanings are written in the selected language
+  const visibleFolders = folders.filter((f) =>
+    matchesMeaningLanguage(f.meaningLanguage, meaningLanguageFilter),
+  );
+  // only offer languages that some folder actually uses
+  const folderMeaningLanguages = meaningLanguagesIn(folders);
+
   // when user selects a folder to view, update currentFolderId and reload words
   const handleSelectFolderForView = async (folderId: number | null) => {
     setCurrentFolderId(folderId);
@@ -300,14 +322,32 @@ export default function WordbookPage({
     await fetchWords(folderId, 1);
   };
 
+  // filtering away the folder currently on screen would leave the table showing
+  // words the filter says to hide, so jump to the first one that survives
+  const handleMeaningLanguageFilter = async (code: string) => {
+    setMeaningLanguageFilter(code);
+    const remaining = folders.filter((f) =>
+      matchesMeaningLanguage(f.meaningLanguage, code),
+    );
+    if (currentFolderId && remaining.some((f) => f.id === currentFolderId)) {
+      return;
+    }
+    await handleSelectFolderForView(remaining[0]?.id ?? null);
+  };
+
   // --- Create Directory handlers ---
   const handleCreateDirectory = () => {
-    setFolderForm({ name: "", language: "japanese" });
+    setFolderForm({
+      name: "",
+      language: "japanese",
+      // preselect the language the user most likely writes meanings in
+      meaningLanguage: detectMeaningLanguage(),
+    });
     setShowCreateModal(true);
   };
 
   const handleCreateFormChange = (
-    field: "name" | "language",
+    field: "name" | "language" | "meaningLanguage",
     value: string,
   ) => {
     setFolderForm((prev) => ({ ...prev, [field]: value }));
@@ -326,6 +366,7 @@ export default function WordbookPage({
       await api.post(url, {
         name: folderForm.name,
         language: folderForm.language,
+        meaningLanguage: folderForm.meaningLanguage,
       });
       // refresh folder list after creation
       await fetchFolders();
@@ -607,6 +648,26 @@ export default function WordbookPage({
                     required
                   />
                 </label>
+                <label style={styles.label}>
+                  Meaning language
+                  <select
+                    style={styles.input}
+                    value={folderForm.meaningLanguage}
+                    onChange={(e) =>
+                      handleCreateFormChange("meaningLanguage", e.target.value)
+                    }
+                    required
+                  >
+                    {MEANING_LANGUAGES.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span style={styles.fieldHint}>
+                    The language you write the meanings in.
+                  </span>
+                </label>
               </div>
               <div style={styles.modalFooter}>
                 <button
@@ -658,7 +719,8 @@ export default function WordbookPage({
                     <option value="">-- Choose Directory --</option>
                     {folders.map((f) => (
                       <option key={f.id} value={f.id}>
-                        {f.name} ({f.language})
+                        {f.name} ({f.language}
+                        {meaningLanguageSuffix(f.meaningLanguage, " → ")})
                       </option>
                     ))}
                   </select>
@@ -761,23 +823,42 @@ export default function WordbookPage({
 
       {/* folder chooser / quick switch (optional) */}
       {folders.length > 0 && (
-        <div style={{ margin: "10px 0", textAlign: "left" }}>
-          <label style={{ marginRight: 8 }}>Show folder:</label>
-          <select
-            value={currentFolderId ?? ""}
-            onChange={(e) =>
-              handleSelectFolderForView(
-                e.target.value === "" ? null : parseInt(e.target.value, 10),
-              )
-            }
-          >
-            <option value="">-- none --</option>
-            {folders.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+        <div style={styles.folderControls}>
+          <div>
+            <label style={{ marginRight: 8 }}>Show folder:</label>
+            <select
+              value={currentFolderId ?? ""}
+              onChange={(e) =>
+                handleSelectFolderForView(
+                  e.target.value === "" ? null : parseInt(e.target.value, 10),
+                )
+              }
+            >
+              <option value="">-- none --</option>
+              {visibleFolders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                  {meaningLanguageSuffix(f.meaningLanguage)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {folderMeaningLanguages.length > 0 && (
+            <div>
+              <label style={{ marginRight: 8 }}>Meaning language:</label>
+              <select
+                value={meaningLanguageFilter}
+                onChange={(e) => handleMeaningLanguageFilter(e.target.value)}
+              >
+                <option value="">All languages</option>
+                {folderMeaningLanguages.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       )}
 
@@ -787,6 +868,11 @@ export default function WordbookPage({
         <div style={styles.directoryDisplay}>
           <span style={styles.directoryText}>
             Current Directory: <strong>{CURRENT_DIRECTORY}</strong>
+            {currentFolder &&
+              meaningLanguageSuffix(
+                currentFolder.meaningLanguage,
+                " · Meaning in ",
+              )}
           </span>
         </div>
 
@@ -1071,6 +1157,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderLeft: "4px solid #0070f3",
     paddingLeft: "10px",
   },
+  folderControls: {
+    margin: "10px 0",
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "18px",
+    textAlign: "left",
+  },
   wordTableContainer: {
     marginBottom: "40px",
     position: "relative",
@@ -1240,6 +1334,11 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     fontSize: 14,
     paddingTop: 6,
+  },
+  fieldHint: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#64748b",
   },
   input: {
     padding: "8px 10px",

@@ -62,7 +62,10 @@ export interface WordFolder {
   id: number;
   user: User;
   name: string;
+  /** Language being studied, e.g. "japanese". */
   language: string;
+  /** ISO 639-1 code of the language the meanings are written in, e.g. "ko". */
+  meaningLanguage: string;
 }
 
 export interface CreateSentencesPageProps {

@@ -8,6 +8,13 @@ import {
 } from "../../../../types/contents";
 import { api, useAccessToken } from "@/lib/api";
 import { fetchWordsPage } from "@/lib/words";
+import {
+  DEFAULT_MEANING_LANGUAGE,
+  matchesMeaningLanguage,
+  meaningLanguageName,
+  meaningLanguageSuffix,
+  meaningLanguagesIn,
+} from "@/lib/languages";
 import { useSearchParams, useRouter } from "next/navigation";
 
 export default function SharedFolderPage(props: {
@@ -42,10 +49,12 @@ export default function SharedFolderPage(props: {
   const [shareForm, setShareForm] = useState<{
     name: string;
     language: string;
+    meaningLanguage: string;
     folderId?: number;
   }>({
     name: "",
     language: "english",
+    meaningLanguage: DEFAULT_MEANING_LANGUAGE,
     folderId: undefined,
   });
 
@@ -53,6 +62,9 @@ export default function SharedFolderPage(props: {
   const [currentFolderId, setCurrentFolderId] = useState<number | null>(null);
 
   const [folders, setFolders] = useState<WordFolder[]>(wordFolders);
+  // "" = every language; otherwise only folders whose meanings are in that one
+  const [sharedLanguageFilter, setSharedLanguageFilter] = useState("");
+  const [myFolderLanguageFilter, setMyFolderLanguageFilter] = useState("");
 
   useEffect(() => {
     if (folders.length === 0) {
@@ -86,9 +98,11 @@ export default function SharedFolderPage(props: {
   const openShareModal = () => {
     const selected =
       folders.find((f) => f.id === currentFolderId) ?? folders[0] ?? null;
+    setMyFolderLanguageFilter("");
     setShareForm({
       name: selected?.name ?? "",
       language: selected?.language ?? "english",
+      meaningLanguage: selected?.meaningLanguage ?? DEFAULT_MEANING_LANGUAGE,
       folderId: selected?.id,
     });
     setShowShareModal(true);
@@ -104,7 +118,22 @@ export default function SharedFolderPage(props: {
       folderId,
       name: nextFolder?.name ?? prev.name,
       language: nextFolder?.language ?? prev.language,
+      meaningLanguage: nextFolder?.meaningLanguage ?? prev.meaningLanguage,
     }));
+  };
+  // the folder picked earlier may not survive the new filter, so fall back to
+  // the first one that does rather than leaving an invisible folder selected
+  const handleMyFolderLanguageFilter = (code: string) => {
+    setMyFolderLanguageFilter(code);
+    const remaining = folders.filter((f) =>
+      matchesMeaningLanguage(f.meaningLanguage, code),
+    );
+    if (remaining.some((f) => f.id === shareForm.folderId)) return;
+    if (remaining.length === 0) {
+      setShareForm((prev) => ({ ...prev, folderId: undefined }));
+      return;
+    }
+    handleShareFolderSelect(remaining[0].id);
   };
   const submitShareFolder = async (e?: FormEvent) => {
     if (e) e.preventDefault();
@@ -125,6 +154,7 @@ export default function SharedFolderPage(props: {
         folderId: folderIdToShare,
         name: shareForm.name,
         language: shareForm.language,
+        meaningLanguage: shareForm.meaningLanguage,
       };
       const resp = await api.post(`/sharedFolder`, body);
       if (resp?.data) {
@@ -265,6 +295,22 @@ export default function SharedFolderPage(props: {
       alert("Failed to fetch folders.");
     }
   };
+
+  // only offer languages that something in the list actually uses
+  const sharedMeaningLanguages = meaningLanguagesIn(
+    sharedFolders.map((sf) => sf.wordFolder ?? {}),
+  );
+  const visibleSharedFolders = sharedFolders.filter((sf) =>
+    matchesMeaningLanguage(
+      sf.wordFolder?.meaningLanguage,
+      sharedLanguageFilter,
+    ),
+  );
+  const myFolderMeaningLanguages = meaningLanguagesIn(folders);
+  const visibleMyFolders = folders.filter((f) =>
+    matchesMeaningLanguage(f.meaningLanguage, myFolderLanguageFilter),
+  );
+
   return (
     <div style={styles.page}>
       <div style={styles.hero}>
@@ -309,6 +355,23 @@ export default function SharedFolderPage(props: {
             <h2 style={styles.sectionTitle}>Community Shared Folders</h2>
             <p style={styles.sectionSub}>Most recently shared folders.</p>
           </div>
+          {sharedMeaningLanguages.length > 0 && (
+            <label style={styles.filterLabel}>
+              <span>Meaning language</span>
+              <select
+                value={sharedLanguageFilter}
+                onChange={(e) => setSharedLanguageFilter(e.target.value)}
+                style={{ ...styles.select, marginTop: 0 }}
+              >
+                <option value="">All languages</option>
+                {sharedMeaningLanguages.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         {sharedFolders.length === 0 && (
           <div style={styles.emptyState}>
@@ -316,8 +379,15 @@ export default function SharedFolderPage(props: {
             No shared folders have been posted yet. Be the first to share one!
           </div>
         )}
+        {sharedFolders.length > 0 && visibleSharedFolders.length === 0 && (
+          <div style={styles.emptyState}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🔍</div>
+            No shared folders with meanings in{" "}
+            {meaningLanguageName(sharedLanguageFilter)} yet.
+          </div>
+        )}
         <div style={styles.folderList}>
-          {sharedFolders.map((folder) => (
+          {visibleSharedFolders.map((folder) => (
             <div
               key={
                 typeof folder.id === "object" ? folder.id.folderId : folder.id
@@ -328,6 +398,10 @@ export default function SharedFolderPage(props: {
               <h3 style={styles.folderName}>
                 {folder.wordFolder?.name ?? folder.wordFolder.name}
               </h3>
+              <p style={styles.folderInfo}>
+                Meaning ·{" "}
+                {meaningLanguageName(folder.wordFolder?.meaningLanguage)}
+              </p>
               <p style={styles.folderInfo}>
                 Author · {folder.user?.name ?? "unknown"}
               </p>
@@ -377,6 +451,27 @@ export default function SharedFolderPage(props: {
             </div>
             <form onSubmit={submitShareFolder}>
               <div style={{ ...styles.modalBody, gridTemplateColumns: "1fr" }}>
+                {myFolderMeaningLanguages.length > 0 && (
+                  <div style={styles.label}>
+                    <span style={{ fontWeight: "bold", marginBottom: 6 }}>
+                      Filter My Folders by Meaning Language
+                    </span>
+                    <select
+                      value={myFolderLanguageFilter}
+                      onChange={(e) =>
+                        handleMyFolderLanguageFilter(e.target.value)
+                      }
+                      style={styles.select}
+                    >
+                      <option value="">All languages</option>
+                      {myFolderMeaningLanguages.map((lang) => (
+                        <option key={lang.code} value={lang.code}>
+                          {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div style={styles.label}>
                   <span style={{ fontWeight: "bold", marginBottom: 6 }}>
                     Select Folder to Share
@@ -391,9 +486,10 @@ export default function SharedFolderPage(props: {
                     <option value="" disabled>
                       Select a folder
                     </option>
-                    {folders.map((folder) => (
+                    {visibleMyFolders.map((folder) => (
                       <option key={folder.id} value={folder.id}>
                         {folder.name} · {folder.language}
+                        {meaningLanguageSuffix(folder.meaningLanguage, " → ")}
                       </option>
                     ))}
                   </select>
@@ -417,6 +513,16 @@ export default function SharedFolderPage(props: {
                   </span>
                   <div style={{ ...styles.input, backgroundColor: "#f8fafc" }}>
                     {shareForm.language}
+                  </div>
+                </div>
+                <div style={styles.label}>
+                  {/* set when the folder was created — shown so the sharer can
+                      see which audience will find it */}
+                  <span style={{ fontWeight: "bold", marginBottom: 6 }}>
+                    Meaning Language
+                  </span>
+                  <div style={{ ...styles.input, backgroundColor: "#f8fafc" }}>
+                    {meaningLanguageName(shareForm.meaningLanguage)}
                   </div>
                 </div>
               </div>
@@ -556,6 +662,10 @@ export default function SharedFolderPage(props: {
                             sf.wordFolder?.name ??
                             "Untitled"}
                         </h4>
+                        <p style={styles.folderInfo}>
+                          Meaning ·{" "}
+                          {meaningLanguageName(sf.wordFolder?.meaningLanguage)}
+                        </p>
 
                         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                           <button
@@ -701,7 +811,17 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 16,
+    flexWrap: "wrap",
     marginBottom: 16,
+  },
+  filterLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#0f172a",
   },
   folderList: {
     display: "grid",
