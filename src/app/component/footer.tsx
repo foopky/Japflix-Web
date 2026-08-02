@@ -25,6 +25,9 @@ export default function Footer() {
             <Link href="/terms" style={styles.link}>
               Terms of Service
             </Link>
+            <Link href="/privacy" style={styles.link}>
+              Privacy Policy
+            </Link>
           </div>
         </div>
 

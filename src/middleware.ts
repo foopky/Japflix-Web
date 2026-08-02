@@ -12,7 +12,7 @@ import {
 // Entry-point refresh. Runs before any page renders, which is the only place
 // on the server where cookies can actually be written for a navigation —
 // Server Components can read cookies but not set them.
-const PUBLIC_PATHS = ["/login", "/signup", "/terms"];
+const PUBLIC_PATHS = ["/login", "/signup", "/terms", "/privacy"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some(
