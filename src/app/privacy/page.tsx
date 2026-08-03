@@ -196,9 +196,10 @@ export default function PrivacyPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: "32px 26px",
+    padding: "clamp(20px, 5vw, 32px) clamp(14px, 4vw, 26px)",
     background: "radial-gradient(circle at 20% 20%, #e0f2fe 0, #ffffff 35%)",
-    minHeight: "100vh",
+    // dvh, so the mobile address bar doesn't add a screenful of dead scroll
+    minHeight: "100dvh",
     fontFamily: "'Noto Sans', 'Inter', system-ui, -apple-system, sans-serif",
   },
   content: {
@@ -206,19 +207,21 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 auto",
     backgroundColor: "#fff",
     borderRadius: 14,
-    padding: "32px",
+    padding: "clamp(20px, 5vw, 32px)",
     boxShadow: "0 12px 28px rgba(15, 23, 42, 0.1)",
   },
   header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
+    gap: 12,
     marginBottom: 24,
     paddingBottom: 20,
     borderBottom: "2px solid #e0f2fe",
   },
   title: {
-    fontSize: 32,
+    fontSize: "clamp(24px, 6vw, 32px)",
     fontWeight: 800,
     color: "#0f172a",
     margin: 0,

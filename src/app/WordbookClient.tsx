@@ -3,6 +3,7 @@
 import React, { FormEvent, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api, useAccessToken } from "@/lib/api";
+import { useIsMobile, useResponsiveStyles } from "@/lib/responsive";
 import { WORDS_PAGE_SIZE, fetchWordsPage } from "@/lib/words";
 import {
   DEFAULT_MEANING_LANGUAGE,
@@ -33,6 +34,8 @@ export default function WordbookPage({
 }: WordbookClientProps) {
   useAccessToken(authToken);
   const router = useRouter();
+  const isMobile = useIsMobile();
+  const styles = useResponsiveStyles(baseStyles, mobileStyles);
   const [words, setWords] = useState<WordEntry[]>([]);
   const [addWord, setAddWord] = useState<WordInput | null>(null);
   const [checkedWordIds, setCheckedWordIds] = useState<number[]>([]);
@@ -516,8 +519,9 @@ export default function WordbookPage({
   // totalPages/totalWordCount come from the response envelope.
   const pageCount = Math.max(1, totalPages);
 
-  // sliding window of page numbers (max 10), kept centered on the current page
-  const PAGE_WINDOW = 10;
+  // sliding window of page numbers, kept centered on the current page. Ten
+  // buttons is wider than a phone screen, so narrow viewports get half of them.
+  const PAGE_WINDOW = isMobile ? 5 : 10;
   const pageStart =
     pageCount <= PAGE_WINDOW
       ? 1
@@ -1039,13 +1043,12 @@ export default function WordbookPage({
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const baseStyles: Record<string, React.CSSProperties> = {
   container: {
     padding: "20px",
     maxWidth: "1200px",
     margin: "0 auto",
     fontFamily: "Nanum Gothic, Arial, sans-serif",
-    minHeight: "100vh",
   },
   header: {
     display: "flex",
@@ -1183,6 +1186,7 @@ const styles: Record<string, React.CSSProperties> = {
   scrollWrapper: {
     // let the wide table scroll inside its own box instead of the whole page
     overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
     border: "1px solid #ddd",
     borderRadius: "8px",
     width: "100%",
@@ -1250,6 +1254,9 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
+    // a full page window is wider than a narrow screen; wrapping it keeps the
+    // row inside the page instead of stretching the document sideways
+    flexWrap: "wrap",
     gap: "8px",
     marginTop: "20px",
     padding: "15px 0",
@@ -1354,4 +1361,48 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 60,
     resize: "vertical",
   },
+};
+
+// Merged over baseStyles while the viewport is narrow. Only the keys that
+// actually have to change are listed; everything else is inherited as-is.
+const mobileStyles: Record<string, React.CSSProperties> = {
+  container: { padding: "16px 12px 28px" },
+  // the buttons wrap onto their own full-width row here, so only the title
+  // has to keep clear of the floating menu button
+  header: { paddingRight: 0, gap: 12, marginBottom: 20 },
+  title: { fontSize: 22, margin: 0, paddingRight: 52 },
+  buttonGroup: { width: "100%", gap: 8 },
+  // two per row on a phone, and they share the leftover space evenly
+  button: { flex: "1 1 140px", padding: "10px 12px", fontSize: 13 },
+  menuWrapper: { top: 12, right: 12, gap: 8 },
+  menuButton: { width: 46, height: 46 },
+  menuDropdown: {
+    // never let the panel reach past either edge of the screen
+    width: "min(220px, calc(100vw - 24px))",
+    padding: 10,
+    gap: 8,
+  },
+  menuItem: { padding: "11px 14px", fontSize: 14 },
+  folderControls: { flexDirection: "column", alignItems: "stretch", gap: 10 },
+  directoryDisplay: { textAlign: "left" },
+  directoryText: { display: "inline-block", fontSize: 14 },
+  pagination: { gap: 6, marginTop: 16, padding: "12px 0" },
+  pageButton: { padding: "8px 10px", minWidth: 36, fontSize: 13 },
+  // the counter gets a line of its own under the buttons
+  pageEllipsis: {
+    flexBasis: "100%",
+    marginLeft: 0,
+    marginTop: 6,
+    textAlign: "center",
+  },
+  // a tall form has to be scrollable from the top, not centred and cut off
+  modalOverlay: {
+    alignItems: "flex-start",
+    padding: "16px 12px",
+    overflowY: "auto",
+  },
+  modal: { width: "100%", maxWidth: "100%" },
+  modalBody: { gridTemplateColumns: "1fr", maxHeight: "none" },
+  modalFooter: { flexWrap: "wrap" },
+  noData: { padding: "36px 16px", fontSize: 15 },
 };

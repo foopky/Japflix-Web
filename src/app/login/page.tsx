@@ -23,7 +23,9 @@ const styles: Record<string, React.CSSProperties> = {
   // ... (이전에 제공된 styles 객체를 여기에 그대로 붙여넣습니다)
   container: {
     maxWidth: "400px",
-    margin: "50px auto",
+    // leaves a gutter on a phone instead of the card touching both edges
+    width: "calc(100% - 32px)",
+    margin: "clamp(24px, 8vw, 50px) auto",
     padding: "20px",
     border: "1px solid #ddd",
     borderRadius: "8px",

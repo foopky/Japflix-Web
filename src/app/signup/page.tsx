@@ -20,7 +20,9 @@ interface SignUpFormData {
 const styles: Record<string, React.CSSProperties> = {
   container: {
     maxWidth: "400px",
-    margin: "50px auto",
+    // leaves a gutter on a phone instead of the card touching both edges
+    width: "calc(100% - 32px)",
+    margin: "clamp(24px, 8vw, 50px) auto",
     padding: "20px",
     border: "1px solid #ddd",
     borderRadius: "8px",

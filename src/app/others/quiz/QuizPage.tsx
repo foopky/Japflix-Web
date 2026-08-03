@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, useAccessToken } from "@/lib/api";
+import { useIsMobile } from "@/lib/responsive";
 import { fetchAllWords, fetchWordCount } from "@/lib/words";
 import type { WordEntry, WordFolder } from "../../../../types/contents";
 import { useSearchParams } from "next/navigation";
@@ -73,6 +74,7 @@ type StylesType = {
 export default function QuizPage(props: { userId: string; authToken: string }) {
   const { userId, authToken } = props;
   useAccessToken(authToken);
+  const isMobile = useIsMobile();
 
   const searchParams = useSearchParams();
   const wordFolders = JSON.parse(searchParams.get("wordFolders") || "[]");
@@ -157,21 +159,22 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
   const styles = useMemo(
     () => ({
       container: {
-        minHeight: "100vh",
+        // dvh, so the mobile address bar doesn't add a screenful of dead scroll
+        minHeight: "100dvh",
         background:
           "radial-gradient(circle at 20% 20%, #e0f2fe 0, #ffffff 35%)",
-        padding: 20,
+        padding: isMobile ? 12 : 20,
       },
       card: {
         maxWidth: 1000,
         margin: "0 auto",
         background: "#fff",
         borderRadius: 16,
-        padding: 40,
+        padding: isMobile ? 20 : 40,
         boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
       },
       title: {
-        fontSize: 32,
+        fontSize: isMobile ? 24 : 32,
         fontWeight: 800,
         color: "#1f2937",
         marginBottom: 8,
@@ -205,6 +208,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
         gap: 16,
         alignItems: "center",
         justifyContent: "center",
+        flexWrap: "wrap" as const,
       },
       select: {
         padding: "12px 16px",
@@ -215,7 +219,9 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
         backgroundColor: "#f9fafb",
         cursor: "pointer",
         transition: "all 0.2s",
-        minWidth: 220,
+        // 220px doesn't fit next to a label on a phone
+        minWidth: isMobile ? 0 : 220,
+        width: isMobile ? "100%" : undefined,
       },
       input: {
         padding: "12px 16px",
@@ -224,15 +230,18 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
         fontSize: 14,
         fontWeight: 600,
         backgroundColor: "#f9fafb",
-        width: 120,
+        width: isMobile ? "100%" : 120,
         transition: "all 0.2s",
       },
       modeButtonGroup: {
         display: "flex",
+        flexWrap: "wrap" as const,
         gap: 10,
       },
       modeButton: (isActive: boolean) => ({
-        padding: "12px 24px",
+        // grow to share the row once they wrap onto separate lines
+        flex: isMobile ? "1 1 140px" : undefined,
+        padding: isMobile ? "12px 14px" : "12px 24px",
         borderRadius: 10,
         border: "2px solid",
         borderColor: isActive ? "#667eea" : "#e5e7eb",
@@ -245,7 +254,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
         boxShadow: isActive ? "0 6px 20px rgba(102, 126, 234, 0.3)" : "none",
       }),
       button: {
-        padding: "14px 32px",
+        padding: isMobile ? "14px 20px" : "14px 32px",
         borderRadius: 10,
         border: "none",
         fontWeight: 700,
@@ -273,6 +282,8 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
+        flexWrap: "wrap" as const,
+        gap: 8,
         marginTop: 16,
         color: "#1f2937",
         fontSize: 15,
@@ -305,6 +316,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
       },
       navRow: {
         display: "flex",
+        flexWrap: "wrap" as const,
         gap: 12,
         marginTop: 24,
         justifyContent: "flex-end",
@@ -342,7 +354,7 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
         marginTop: 6,
       },
     }),
-    [],
+    [isMobile],
   );
 
   // The quiz samples questions and builds distractors from the whole folder,
@@ -533,6 +545,8 @@ export default function QuizPage(props: { userId: string; authToken: string }) {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "flex-start",
+                flexWrap: "wrap",
+                gap: 12,
                 marginBottom: 24,
               }}
             >

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useResponsiveStyles } from "@/lib/responsive";
 
 export const GUIDE_STORAGE_KEY = "vocab_guide_seen_v1";
 
@@ -93,6 +94,7 @@ export default function OnboardingGuide({
   onClose: () => void;
 }) {
   const [stepIndex, setStepIndex] = useState(0);
+  const styles = useResponsiveStyles(baseStyles, mobileStyles);
 
   // always restart from the first slide when the guide is opened
   useEffect(() => {
@@ -194,7 +196,7 @@ export default function OnboardingGuide({
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const baseStyles: Record<string, React.CSSProperties> = {
   overlay: {
     position: "fixed",
     top: 0,
@@ -318,4 +320,19 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#0f172a",
     border: "1px solid #e2e8f0",
   },
+};
+
+const mobileStyles: Record<string, React.CSSProperties> = {
+  overlay: { padding: 12, alignItems: "flex-start", overflowY: "auto" },
+  // 90vh measures past the address bar on a phone, so the footer ends up
+  // below the fold with no way to reach it
+  modal: { maxHeight: "calc(100dvh - 24px)", marginTop: "auto", marginBottom: "auto" },
+  body: { padding: "8px 16px 4px" },
+  icon: { fontSize: 38 },
+  title: { fontSize: 19, margin: "0 0 12px" },
+  listItem: { fontSize: 13.5, padding: "9px 12px" },
+  footer: { padding: "12px 16px 16px", gap: 8 },
+  button: { flex: 1, padding: "12px 14px" },
+  // the fixed width would push "Get started" off the edge next to Back
+  primaryButton: { minWidth: 0 },
 };

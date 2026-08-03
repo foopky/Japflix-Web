@@ -413,9 +413,10 @@ export default function SettingsPageClient({
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: "32px 26px",
+    padding: "clamp(20px, 5vw, 32px) clamp(14px, 4vw, 26px)",
     background: "radial-gradient(circle at 20% 20%, #e0f2fe 0, #ffffff 35%)",
-    minHeight: "100vh",
+    // dvh, so the mobile address bar doesn't add a screenful of dead scroll
+    minHeight: "100dvh",
     fontFamily: "'Noto Sans', 'Inter', system-ui, -apple-system, sans-serif",
   },
   content: {
@@ -426,11 +427,12 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
     gap: 12,
     marginBottom: 24,
   },
   title: {
-    fontSize: 36,
+    fontSize: "clamp(26px, 7vw, 36px)",
     fontWeight: 800,
     color: "#0f172a",
   },
@@ -447,7 +449,7 @@ const styles: Record<string, React.CSSProperties> = {
   section: {
     backgroundColor: "#fff",
     borderRadius: 14,
-    padding: 24,
+    padding: "clamp(16px, 4vw, 24px)",
     marginBottom: 24,
     border: "1px solid #e2e8f0",
     boxShadow: "0 12px 28px rgba(15, 23, 42, 0.1)",
@@ -527,6 +529,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   formActions: {
     display: "flex",
+    flexWrap: "wrap",
     gap: 10,
     marginTop: 12,
     justifyContent: "flex-end",

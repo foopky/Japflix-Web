@@ -7,6 +7,7 @@ import {
   WordFolder,
 } from "../../../../types/contents";
 import { api, useAccessToken } from "@/lib/api";
+import { useResponsiveStyles } from "@/lib/responsive";
 import { fetchWordsPage } from "@/lib/words";
 import {
   DEFAULT_MEANING_LANGUAGE,
@@ -27,6 +28,7 @@ export default function SharedFolderPage(props: {
 
   const { authToken, userId } = props;
   useAccessToken(authToken);
+  const styles = useResponsiveStyles(baseStyles, mobileStyles);
   const [sharedFolders, setSharedFolders] = useState<SharedFolder[]>([]); // show shared folders area
   const [shareFolderWords, setShareFolderWords] = useState<WordEntry[]>([]); // words in selected shared folder
   const [showViewSharedModal, setShowViewSharedModal] = useState(false);
@@ -566,8 +568,16 @@ export default function SharedFolderPage(props: {
                   No words in this folder.
                 </div>
               ) : (
-                <div style={{ maxHeight: 360, overflowY: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <div
+                  style={{ maxHeight: 360, overflowY: "auto", overflowX: "auto" }}
+                >
+                  <table
+                    style={{
+                      width: "100%",
+                      minWidth: 420,
+                      borderCollapse: "collapse",
+                    }}
+                  >
                     <thead>
                       <tr style={{ backgroundColor: "#f4f4f4" }}>
                         <th style={{ padding: 8, textAlign: "left" }}>Word</th>
@@ -697,11 +707,12 @@ export default function SharedFolderPage(props: {
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const baseStyles: Record<string, React.CSSProperties> = {
   page: {
     padding: "32px 26px 48px",
     background: "radial-gradient(circle at 20% 20%, #e0f2fe 0, #ffffff 35%)",
-    minHeight: "100vh",
+    // dvh, so the mobile address bar doesn't add a screenful of dead scroll
+    minHeight: "100dvh",
     fontFamily: "'Noto Sans KR', 'Inter', system-ui, -apple-system, sans-serif",
   },
   hero: {
@@ -825,7 +836,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   folderList: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+    // min() so a card never insists on 260px inside a narrower screen
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))",
     gap: 16,
   },
   emptyState: {
@@ -962,5 +974,40 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 6,
     backgroundColor: "#fff",
     fontSize: 14,
+  },
+};
+
+// Merged over baseStyles while the viewport is narrow.
+const mobileStyles: Record<string, React.CSSProperties> = {
+  page: { padding: "20px 14px 32px" },
+  hero: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    padding: "18px 16px",
+    gap: 14,
+  },
+  heroTitle: { fontSize: 24 },
+  heroActions: { flexWrap: "wrap", gap: 8 },
+  button: { flex: "1 1 140px", padding: "10px 12px", fontSize: 13 },
+  sharedFolderSection: { marginTop: 18, padding: 14 },
+  sectionHeader: { flexDirection: "column", alignItems: "stretch", gap: 10 },
+  sectionTitle: { fontSize: 19 },
+  filterLabel: { flexWrap: "wrap" },
+  folderList: { gridTemplateColumns: "1fr" },
+  // a tall form has to be scrollable from the top, not centred and cut off
+  modalOverlay: {
+    alignItems: "flex-start",
+    padding: "16px 12px",
+    overflowY: "auto",
+  },
+  modal: { width: "100%", maxWidth: "100%" },
+  modalBody: { gridTemplateColumns: "1fr", maxHeight: "none" },
+  modalFooter: { flexWrap: "wrap" },
+  // the pager takes the whole first row instead of squeezing Close off the edge
+  modalPager: {
+    marginRight: 0,
+    width: "100%",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
   },
 };

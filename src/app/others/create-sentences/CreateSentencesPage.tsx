@@ -1,5 +1,6 @@
 "use client";
 import { api, useAccessToken } from "@/lib/api";
+import { useIsMobile } from "@/lib/responsive";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CreateSentencesPageProps } from "../../../../types/contents";
@@ -23,6 +24,7 @@ export default function CreateSentencesPage({
 }: CreateSentencesPageProps) {
   useAccessToken(authToken);
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [sentences, setSentences] = useState<SentenceResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
@@ -93,11 +95,14 @@ export default function CreateSentencesPage({
 
   const styles = {
     container: {
-      height: "100vh",
+      // a phone can't spare a nested scroll region, and 100vh sits partly
+      // behind the address bar — so let the page itself scroll instead
+      height: isMobile ? "auto" : "100vh",
+      minHeight: isMobile ? "100dvh" : undefined,
       display: "flex",
       flexDirection: "column" as const,
       background: "radial-gradient(circle at 20% 20%, #e0f2fe 0, #ffffff 35%)",
-      overflow: "hidden",
+      overflow: isMobile ? "visible" : "hidden",
     },
     wrapper: {
       flex: "1",
@@ -106,8 +111,8 @@ export default function CreateSentencesPage({
       maxWidth: "800px",
       width: "100%",
       margin: "0 auto",
-      padding: "20px",
-      overflow: "auto",
+      padding: isMobile ? "16px 12px 28px" : "20px",
+      overflow: isMobile ? "visible" : "auto",
     },
     backButton: {
       alignSelf: "flex-start",
@@ -127,7 +132,7 @@ export default function CreateSentencesPage({
       marginBottom: "20px",
     },
     title: {
-      fontSize: "32px",
+      fontSize: isMobile ? "24px" : "32px",
       fontWeight: "bold",
       color: "#0f172a",
       marginBottom: "5px",
@@ -140,7 +145,7 @@ export default function CreateSentencesPage({
       background: "#ffffff",
       borderRadius: "12px",
       boxShadow: "0 10px 30px rgba(0, 0, 0, 0.2)",
-      padding: "25px",
+      padding: isMobile ? "16px" : "25px",
       marginBottom: "20px",
     },
     formGroup: {
@@ -170,8 +175,9 @@ export default function CreateSentencesPage({
       flexWrap: "wrap" as const,
     },
     styleButton: {
-      flex: "1",
-      padding: "10px 20px",
+      // a wider basis on a phone so three tones wrap instead of squeezing
+      flex: isMobile ? "1 1 100px" : "1",
+      padding: isMobile ? "10px 12px" : "10px 20px",
       fontSize: "14px",
       fontWeight: "600",
       border: "2px solid #667eea",
@@ -182,8 +188,9 @@ export default function CreateSentencesPage({
       transition: "all 0.2s",
     },
     styleButtonActive: {
-      flex: "1",
-      padding: "10px 20px",
+      // a wider basis on a phone so three tones wrap instead of squeezing
+      flex: isMobile ? "1 1 100px" : "1",
+      padding: isMobile ? "10px 12px" : "10px 20px",
       fontSize: "14px",
       fontWeight: "600",
       border: "2px solid #667eea",
@@ -245,7 +252,7 @@ export default function CreateSentencesPage({
       background: "#ffffff",
       borderRadius: "12px",
       boxShadow: "0 10px 30px rgba(0, 0, 0, 0.2)",
-      padding: "25px",
+      padding: isMobile ? "16px" : "25px",
       marginBottom: "20px",
     },
     resultsTitle: {
@@ -296,7 +303,8 @@ export default function CreateSentencesPage({
       fontSize: "14px",
       lineHeight: "1.6",
       fontStyle: "italic",
-      marginLeft: "40px",
+      // the indent costs too much of a narrow screen to be worth keeping
+      marginLeft: isMobile ? 0 : "40px",
     },
     buttonContainer: {
       display: "flex",

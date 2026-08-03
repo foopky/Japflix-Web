@@ -46,7 +46,8 @@ const styles: Record<string, React.CSSProperties> = {
   footer: {
     backgroundColor: "#f5f5f5",
     color: "#1f2937",
-    padding: "40px 20px 24px",
+    // clamp keeps this responsive without making the footer a client component
+    padding: "clamp(24px, 6vw, 40px) clamp(16px, 4vw, 20px) 24px",
     marginTop: "auto",
     borderTop: "1px solid #e5e7eb",
   },
@@ -80,6 +81,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   linksSection: {
     display: "flex",
+    flexWrap: "wrap",
     gap: "20px",
     alignItems: "center",
   },

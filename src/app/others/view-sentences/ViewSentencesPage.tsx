@@ -1,5 +1,6 @@
 "use client";
 import { api, useAccessToken } from "@/lib/api";
+import { useIsMobile } from "@/lib/responsive";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
@@ -14,6 +15,7 @@ export default function ViewSentencesPage({
 }: ViewSentencesPageProps) {
   useAccessToken(authToken);
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [sentences, setSentences] = useState<SentenceResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [wordInfo, setWordInfo] = useState<{
@@ -68,9 +70,10 @@ export default function ViewSentencesPage({
 
   const styles = {
     container: {
-      minHeight: "100vh",
+      // dvh, so the mobile address bar doesn't add a screenful of dead scroll
+      minHeight: "100dvh",
       background: "radial-gradient(circle at 20% 20%, #e0f2fe 0, #ffffff 35%)",
-      padding: "20px",
+      padding: isMobile ? "16px 12px 28px" : "20px",
       overflow: "auto",
     },
     wrapper: {
@@ -94,13 +97,13 @@ export default function ViewSentencesPage({
     headerSection: {
       background: "#ffffff",
       borderRadius: "16px",
-      padding: "40px",
-      marginBottom: "30px",
+      padding: isMobile ? "24px 16px" : "40px",
+      marginBottom: isMobile ? "20px" : "30px",
       boxShadow: "0 20px 60px rgba(0, 0, 0, 0.15)",
       textAlign: "center" as const,
     },
     wordTitle: {
-      fontSize: "36px",
+      fontSize: isMobile ? "26px" : "36px",
       fontWeight: "bold",
       color: "#667eea",
       marginBottom: "12px",
@@ -114,12 +117,12 @@ export default function ViewSentencesPage({
     sentencesHeaderSection: {
       background: "#ffffff",
       borderRadius: "16px",
-      padding: "30px",
+      padding: isMobile ? "18px 16px" : "30px",
       marginBottom: "20px",
       boxShadow: "0 10px 30px rgba(0, 0, 0, 0.1)",
     },
     sectionTitle: {
-      fontSize: "28px",
+      fontSize: isMobile ? "22px" : "28px",
       fontWeight: "bold",
       color: "#374151",
       marginBottom: "8px",
@@ -180,7 +183,8 @@ export default function ViewSentencesPage({
       fontSize: "14px",
       color: "#4b5563",
       lineHeight: "1.6",
-      marginLeft: "51px",
+      // the indent costs too much of a narrow screen to be worth keeping
+      marginLeft: isMobile ? 0 : "51px",
       padding: "12px 16px",
       background: "rgba(255, 255, 255, 0.7)",
       borderRadius: "8px",
@@ -193,13 +197,13 @@ export default function ViewSentencesPage({
       borderRadius: "20px",
       backgroundColor: "#dbeafe",
       color: "#0c4a6e",
-      marginLeft: "51px",
+      marginLeft: isMobile ? 0 : "51px",
       marginTop: "8px",
     },
     noData: {
       background: "#ffffff",
       borderRadius: "12px",
-      padding: "60px 40px",
+      padding: isMobile ? "40px 20px" : "60px 40px",
       textAlign: "center" as const,
       color: "#9ca3af",
       fontSize: "16px",
